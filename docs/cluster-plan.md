@@ -48,10 +48,25 @@ This is a single coherent cluster and nothing more.
 - **D6 — The integration being built is the Culsans-into-Cheshire join.** Cheshire is the platform;
   the coherent quadcore cluster is wired into it. Cheshire is single-core and Culsans is a
   multicore cluster on an older CVA6 — as far as we can determine, nobody has joined them.
-- **D7 — RV64GC + Sv39 + M/S/U + Bitmanip.** No H, no V. Bitmanip via the single `RVB` config bit,
-  which covers Zba + Zbb + Zbc + Zbs with no finer granularity — **Zbc cannot be declined**, and its
-  carry-less multiply XOR tree in the MUL pipe is the most likely source of FPGA timing pressure
-  later. `ZKN` (Zbkb/Zbkx/Zkn) requires a current CVA6.
+- **D7 — RV64GC + Sv39 + M/S/U + Bitmanip.** No H, no V. Bitmanip arrives through the single `RVB`
+  config bit, which covers Zba + Zbb + Zbc + Zbs with no finer granularity — **Zbc cannot be
+  declined**, and its carry-less multiply XOR tree in the MUL pipe is the most likely source of FPGA
+  timing pressure later. `ZKN` (Zbkb/Zbkx/Zkn) is available only on a current CVA6.
+  - **The device tree and the hardware must agree about bitmanip, or Linux dies without a usable
+    message.** Demonstrated on the virtual platform: with `zba`/`zbb`/`zbc`/`zbs` in
+    `riscv,isa-extensions` but a core that does not implement them, Linux 6.18 patches in its
+    Zbb-optimised `strcmp`/`strlen`/`strncmp` through `apply_boot_alternatives()` and then executes
+    those instructions on a core that lacks them. The boot stops silently immediately after
+    `riscv: ELF capabilities`, with no panic and no trace — the next expected line,
+    `Kernel command line:`, simply never appears.
+  - **This is a live risk, not a modelling curiosity.** Cheshire's default build targets a config
+    package with `CVA6ConfigBExtEn = 0`, so a stock Cheshire plus a device tree written from D7
+    reproduces exactly this failure. Whoever flips `CVA6ConfigBExtEn` and whoever writes the device
+    tree must be the same decision.
+  - Contrast with an *unimplemented CSR*, which is benign: a write to a missing `mhpmcounter` is
+    ignored with a warning and the boot continues. A missing **instruction** is fatal. Advertising
+    `zihpm` without the counters cost nothing; advertising `zbb` without the instructions cost the
+    whole boot.
 - **D8 — CLINT + PLIC.** Not AIA. See §4 for why this is not a simple swap. Reserve the IMSIC
   address ranges in the map now and leave the interconnect a spare master port for an MSI-mode
   APLIC — that is free today and converts part of any later swap from an architecture change into
