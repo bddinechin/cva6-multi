@@ -127,12 +127,19 @@ This is a single coherent cluster and nothing more.
   `alias_region_enable` gives every internal subordinate two crossbar rules, one cluster-specific and
   one at a fixed cluster-independent base — and with it enabled `boot_addr` becomes unused, because
   every cluster boots from its own alias address.
-- **D25 — `mhartid = (cluster_id << 2) | core_index`.** Phase 1 is harts 0–3. This is the same
-  decomposition the AIA uses — APLIC computes `g = (HartIndex >> LHXW) & (2^HHXW - 1)` and
-  `h = HartIndex & (2^LHXW - 1)` — so the hart ID, the AIA hart index and the address bit field are
-  one encoding. Sparse hartids are safe: Linux stores them as opaque values in `cpuid_to_hartid_map[]`
-  with no density requirement, OpenSBI indexes through `hart_index2id`, and Carfield already ships
-  sparse hartids (0, 4, 8, 16, 32) under real OpenSBI and Linux.
+- **D25 — `mhartid = (cluster_id << HartIdShift) | core_index`, with `HartIdShift = 4`.** Four bits
+  for the core field, not two: the coherence unit caps the cluster at four cores today, but a
+  directory-based successor would allow up to sixteen, and a two-bit field forecloses it. Phase 1 is
+  unaffected, since cluster 0 gives harts 0–3 under either width. This is also the decomposition the
+  AIA uses — APLIC computes `g = (HartIndex >> LHXW) & (2^HHXW−1)` and `h = HartIndex & (2^LHXW−1)`
+  with `LHXW = HartIdShift` — so the hart id, the AIA hart index and the cluster field of the address
+  are one encoding. **`HartIdShift`, `riscv,hart-index-bits`, and the IMSIC reservation size are the
+  same number**, and the reservation is the one that is cheap to oversize now, so the map reserves the
+  sixteen-core geometry. Sparse hart ids are safe: Linux stores them as opaque values in
+  `cpuid_to_hartid_map[]` with no density requirement, OpenSBI indexes through `hart_index2id`, and
+  Carfield ships sparse ids under both. Note OpenSBI's `SBI_HARTMASK_MAX_BITS` defaults to 128, which
+  8 x 16 harts exactly fills.
+
 - **D26 — An 8 MiB `axi_llc` array in 8 ways of 1 MiB, partitionable up to 7 MiB scratchpad and
   1 MiB L2.** `axi_llc` partitions by way and selects SPM ways through a config register, so eight
   1 MiB ways give 1 MiB partition granularity with "at least one way stays cache" as the floor.
@@ -316,15 +323,16 @@ Physical address width: CVA6's `PLEN` is **56** for RV64 and is not configurable
 | Address | Size | Region | Phase 1 |
 | --- | --- | --- | --- |
 | `0x4000_0000` | 64 KiB | Per-cluster ACLINT reserve (MTIMER/MSWI/SSWI) | reserved — phase 1 uses Cheshire's platform CLINT |
-| `0x4001_0000` | 32 KiB | IMSIC M-mode files, 4 × 4 KiB, aligned `0x8000` | reserved — D8 |
-| `0x4002_0000` | 32 KiB | IMSIC S-mode files, 4 × 4 KiB, aligned `0x8000` | reserved — D8 |
+| `0x4001_0000` | 64 KiB | IMSIC M-mode files, up to 16 × 4 KiB, aligned `0x10000` | reserved — D8 |
+| `0x4002_0000` | 64 KiB | IMSIC S-mode files, up to 16 × 4 KiB, aligned `0x10000` | reserved — D8 |
 | `0x4004_0000` | 32 KiB | APLIC (16 KiB minimum in MSI mode) | reserved — D8 |
 | `0x4010_0000` | 1 MiB | iDMA configuration | ✓ |
 | `0x4020_0000` | 1 MiB | `axi_llc` configuration / way partitioning | ✓ |
 | `0x4030_0000` | 1 MiB | Quality-of-service / regulator registers | reserved |
 | `0x4040_0000` | 28 MiB | Reserved | |
 
-IMSIC geometry for four harts, no virtualisation, one group per cluster: `riscv,hart-index-bits = 2`,
+IMSIC geometry, sized for a sixteen-core ceiling rather than today's four: `riscv,hart-index-bits = 4`
+at that ceiling and 2 while the cluster holds four cores, no virtualisation, one group per cluster,
 `riscv,guest-index-bits = 0`, `riscv,group-index-bits = 3`, `riscv,group-index-shift = 25`. M-mode and
 S-mode files are in separate regions — the AIA says "should" rather than "must", with the reason that
 a single PMP entry can then grant supervisor access to all supervisor-level files, but the Linux
