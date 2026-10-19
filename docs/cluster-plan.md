@@ -201,6 +201,46 @@ This is a single coherent cluster and nothing more.
   survey, the component list and the milestones, each of which stands on its own. There is no RTL
   here and no Bender manifest, and there will not be.
 
+### Virtual platform
+
+- **D35 — The virtual platform is staged, and functional only.** Three vehicles, each with a
+  different job:
+  1. **QEMU `virt`** for the half of the software stack that does not depend on our map — kernel
+     config, initramfs, the HSM multi-hart boot path, and D7's ISA as advertised in a device tree.
+     Done: `sw/qemu-virt-check.sh`, 4/4 + 5/5 + 13/13.
+  2. **Renode** for **our** map. Done: `sw/renode-check.sh`, 14/14 — OpenSBI 1.6 and Linux 6.18.7
+     boot on the D22-D25 map with four harts online. Chosen because `.repl` platform descriptions
+     are declarative, so a custom address map costs tens of lines rather than hundreds of lines of C.
+  3. **A QEMU machine** for daily software work, when boot time starts to hurt. Not started. The
+     shortcut is Ben Dooks' CVA6 machine series (v4, September 2025, reviewed but never merged):
+     a working CVA6 + CLINT + PLIC + 16550 machine whose memmap table can be swapped for ours.
+  - **Both vehicles are dynamic binary translators.** Renode's `CPU.RiscV64` is a C# wrapper over
+    `translate-riscv64-le.so`, its tlib engine, which is derived from QEMU's TCG. Instruction
+    semantics are modelled; pipeline, caches, bus arbitration and timing are not. `cpuType:
+    "rv64gc_zba_zbb_zbc_zbs"` selects decode paths and is the *only* respect in which the core
+    resembles CVA6 — no HPDcache, no `std_cache`, no ACE port, no coherence unit at all.
+  - **Therefore it validates the map, the device tree and the software, and nothing about the
+    hardware.** A functional model that boots cleanly while the RTL has an ordering bug is the
+    expected outcome. D18's litmus gate stays on RTL.
+- **D36 — Renode hosting Verilated RTL is the candidate bridge to phase 1.** Renode ships a
+  `CoSimulationPlugin`, and the idiom extends to the **CPU**, not only peripherals: Verilator
+  compiles the RTL into a shared library and Renode loads it in place of a tlib core. Their
+  `verilated_ibex.resc` shows it as one line — `cpu SimulationFilePathLinux <libVcpu_ibex.so>`.
+  - **Why it is attractive.** The cluster could be Verilated as the CPU complex while Renode keeps
+    supplying the peripherals and the address map that already boots. That is an incremental route
+    from a validated map to real RTL, without first building a complete Verilator testbench and
+    peripheral set — which is otherwise the long pole in D2's phase 1.
+  - **Why it is a candidate and not a decision.** It needs the RTL to exist, so it is gated on the
+    Culsans pin (D12, D13). It competes with a plain Verilator testbench, which has no C# in the
+    loop. And the published example is Ibex, a small RV32 core: a four-hart coherent RV64 cluster is
+    a far larger Verilated object, so throughput collapses toward plain Verilator and the hosting
+    buys less.
+  - **It does not relax D18.** Verilating the cluster inside Renode still leaves the surrounding
+    model non-architectural about memory ordering, so litmus evidence must come from a flow where
+    the whole path is RTL.
+  - Recorded because it was under-rated when the vehicles were first ranked: Renode's
+    co-simulation was assumed to cover peripherals only.
+
 ---
 
 ## 3. Component list
