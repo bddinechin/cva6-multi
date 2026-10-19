@@ -55,6 +55,12 @@ Phase 1 targets Verilator with a behavioural AXI memory. FPGA is a later phase.
 
 ## Licence
 
-[Solderpad Hardware License v2.1](https://solderpad.org/licenses/SHL-2.1/)
-(`Apache-2.0 WITH SHL-2.1`) — see [LICENSE](LICENSE). Chosen to match the licensing of the
-pulp-platform IP this project integrates.
+Copyright 2026 Benoît Dupont de Dinechin
+
+Licensed under the Apache License, Version 2.0 (`Apache-2.0`) — see [LICENSE](LICENSE).
+
+Apache rather than Solderpad because this repository holds documentation and no hardware (D31).
+A hardware licence adds definitions for design rights, mask works and bitstreams that have nothing
+to apply to here; Solderpad is a wraparound over Apache-2.0, so dropping the wrapper loses nothing
+and states the licence plainly. The pulp-platform IP the design integrates keeps its own licences,
+which are unaffected by this repository's.
