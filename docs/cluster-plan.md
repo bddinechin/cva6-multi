@@ -105,6 +105,68 @@ This is a single coherent cluster and nothing more.
   validating the OpenSBI/kernel/initramfs stack there before subjecting it to Verilator avoids
   debugging software bugs at RTL simulation speed.
 
+### Address map and decode
+
+- **D22 — Everything the cluster owns lives inside Cheshire's external window
+  `[0x2000_0000, 0x8000_0000)`.** Not a preference: Cheshire derives CVA6's PMA attributes in
+  `gen_cva6_cfg()` from only EXTROM, BOOTROM, SPM, SPM_UNC, the LLC-out region, and the CIE/non-CIE
+  split of that window. A region outside it gets **no** cacheability, executability or idempotency
+  attribute from any rule. Carfield confirms this empirically — every one of its islands sits inside
+  the same window.
+- **D23 — The cluster ID is the AIA group index, `E = 25`, at `addr[27:25]`.** Cluster *N*'s global
+  aperture base is `0x5000_0000 + (N << 25)`, 32 MiB each. The AIA group-index scheme
+  (`(g << E) | A | (h << C)`, `riscv,group-index-shift` default 24, up to 7 group bits) is the only
+  ratified RISC-V convention placing a cluster ID in a physical-address bit field, and its alignment
+  rules on `A` exist specifically so `+` can be implemented as bitwise `|`. The spec names the use
+  case directly: *"each group exists on a separate chip (or chiplet in a multi-chip module)."*
+- **D24 — Two cluster-local aliases, one either side of the CIE split.** Cheshire provides exactly
+  one CIE split point in the external window, so the cacheable alias (scratchpad, `0x2000_0000`) sits
+  below it and the non-cacheable alias (per-cluster MMIO, `0x4000_0000`) above it, via
+  `Cva6ExtCieOnTop = 0` and `Cva6ExtCieLength = 0x0400_0000`. Both stay position-independent, which is
+  what lets one kernel image and device tree run on any cluster unchanged. Precedent: Snitch's
+  `alias_region_enable` gives every internal subordinate two crossbar rules, one cluster-specific and
+  one at a fixed cluster-independent base — and with it enabled `boot_addr` becomes unused, because
+  every cluster boots from its own alias address.
+- **D25 — `mhartid = (cluster_id << 2) | core_index`.** Phase 1 is harts 0–3. This is the same
+  decomposition the AIA uses — APLIC computes `g = (HartIndex >> LHXW) & (2^HHXW - 1)` and
+  `h = HartIndex & (2^LHXW - 1)` — so the hart ID, the AIA hart index and the address bit field are
+  one encoding. Sparse hartids are safe: Linux stores them as opaque values in `cpuid_to_hartid_map[]`
+  with no density requirement, OpenSBI indexes through `hart_index2id`, and Carfield already ships
+  sparse hartids (0, 4, 8, 16, 32) under real OpenSBI and Linux.
+- **D26 — An 8 MiB `axi_llc` array in 8 ways of 1 MiB, partitionable up to 7 MiB scratchpad and
+  1 MiB L2.** `axi_llc` partitions by way and selects SPM ways through a config register, so eight
+  1 MiB ways give 1 MiB partition granularity with "at least one way stays cache" as the floor.
+  Phase 1 configures 1 way scratchpad and 7 ways L2 — nothing consumes the scratchpad yet, but one
+  SPM way exercises the way-partitioning path and the local-alias decode against a real region.
+  Sizing: 1 MiB per way at 64-bit data width means `NumLines × NumBlocks = 131072`, e.g. 64-byte
+  lines and `NumLines = 16384`. Note this is **64× Cheshire's default SPM** of 128 KiB.
+  The cluster gets its own `axi_llc` and Cheshire's is kept as a platform LLC: Cheshire's instance
+  sits in front of DRAM at a fixed address in the static region, which is the wrong slot for a
+  per-cluster L2 and private scratchpad behind the CCU. That leaves two non-coherent layers below the
+  CCU, so the window region must lie outside the cached range of **both** — `axi_llc` decides what to
+  cache by address range rather than by AXI cache attributes, making this a configuration property.
+  Note also that the SPM cached region's nominal size in `cheshire.rdl` is 64 KiB while its real
+  backing is `get_llc_size(cfg)`; routing is correct but generated constants understate it. Free under
+  Verilator; a serious constraint on FPGA, where it exceeds the total block RAM of many parts.
+- **D27 — Structural decode inside and at the cluster boundary; programmable windows only at
+  platform level.** Cluster-local aliases and cluster-ID routing are fixed structural decode —
+  programmability there buys nothing and introduces a way for one cluster to differ from another.
+  Base-and-size programmable windows (the PASW pattern, as found on various SoCs) are the right
+  answer for DRAM extent and any PCIe or flash aperture, because those are boot-time discoveries.
+  Consequence now: **every platform-level region is a single naturally-aligned power-of-two block**,
+  so it can be converted to a window later without moving anything.
+- **D28 — Write our own elaboration assertions.** `cheshire_soc.sv` lines 1783–1796 are all TODO
+  comments; nothing checks external region overlap, legality, or consistency with the CVA6 PMA
+  config. Assert on overlap, CIE boundary alignment, and aperture alignment against the AIA
+  constraint.
+- **D29 — Pin the Cheshire configuration and assert on `ext_base`.** External crossbar ports occupy
+  the top indices after all *enabled* internal ports, so toggling `Dma` or `SerialLink` silently
+  renumbers them. The caps are 15 external AXI subordinates and 15 rules.
+- **D30 — Culsans' SoC top level is discarded; only the CCU and the coherent CVA6 wrapper are
+  taken.** `culsans_top.sv` ships a full SoC with its own hardcoded CLINT at `0x0200_0000` and PLIC at
+  `0x0C00_0000` that would collide with Cheshire's. D6 integrates `ace_ccu_top_intf`, not the Culsans
+  platform.
+
 ---
 
 ## 3. Component list
@@ -221,3 +283,75 @@ of a stock Cheshire** — D7 requires explicitly turning it on.
 Device tree note: the single `riscv,isa` string is deprecated in favour of `riscv,isa-base` plus a
 `riscv,isa-extensions` array. Linux will not enable its Zbb-optimised string routines or report the
 extensions through `hwprobe` unless the DT advertises them. Emit both forms.
+
+---
+
+## 8. Address map
+
+Physical address width: CVA6's `PLEN` is **56** for RV64 and is not configurable (a pure function of
+`XLEN`). Cheshire truncates to `AddrWidth`, default **48**. The map needs 31 bits, so neither binds.
+
+| Range | Size | Class |
+| --- | --- | --- |
+| `0x0000_0000`–`0x1FFF_FFFF` | 512 MiB | **Cheshire, static.** Boot ROM, CLINT `0x0204_0000`, PLIC `0x0400_0000`, UART `0x0300_2000`, SPM, debug ROM. Generated from `cheshire.rdl` via PeakRDL into `cheshire_addrmap_pkg.sv` |
+| `0x2000_0000`–`0x23FF_FFFF` | 64 MiB | **Local alias, cacheable (CIE).** Scratchpad, 8 MiB array. Identical in every cluster |
+| `0x2400_0000`–`0x3FFF_FFFF` | 448 MiB | Reserved |
+| `0x4000_0000`–`0x41FF_FFFF` | 32 MiB | **Local alias, non-cacheable.** Per-cluster MMIO. Identical in every cluster |
+| `0x4200_0000`–`0x4FFF_FFFF` | 222 MiB | Reserved |
+| `0x5000_0000`–`0x5FFF_FFFF` | 8 × 32 MiB | **Per-cluster global apertures.** Cluster *N* at `0x5000_0000 + (N << 25)` |
+| `0x6000_0000`–`0x7FFF_FFFF` | 512 MiB | Reserved |
+| `0x8000_0000`–… | configurable | DRAM, via `LlcOutRegionStart`/`LlcOutRegionEnd` (default 2 GiB) |
+
+### Inside the non-cacheable local alias (`0x4000_0000`, 32 MiB)
+
+| Address | Size | Region | Phase 1 |
+| --- | --- | --- | --- |
+| `0x4000_0000` | 64 KiB | Per-cluster ACLINT reserve (MTIMER/MSWI/SSWI) | reserved — phase 1 uses Cheshire's platform CLINT |
+| `0x4001_0000` | 32 KiB | IMSIC M-mode files, 4 × 4 KiB, aligned `0x8000` | reserved — D8 |
+| `0x4002_0000` | 32 KiB | IMSIC S-mode files, 4 × 4 KiB, aligned `0x8000` | reserved — D8 |
+| `0x4004_0000` | 32 KiB | APLIC (16 KiB minimum in MSI mode) | reserved — D8 |
+| `0x4010_0000` | 1 MiB | iDMA configuration | ✓ |
+| `0x4020_0000` | 1 MiB | `axi_llc` configuration / way partitioning | ✓ |
+| `0x4030_0000` | 1 MiB | Quality-of-service / regulator registers | reserved |
+| `0x4040_0000` | 28 MiB | Reserved | |
+
+IMSIC geometry for four harts, no virtualisation, one group per cluster: `riscv,hart-index-bits = 2`,
+`riscv,guest-index-bits = 0`, `riscv,group-index-bits = 3`, `riscv,group-index-shift = 25`. M-mode and
+S-mode files are in separate regions — the AIA says "should" rather than "must", with the reason that
+a single PMP entry can then grant supervisor access to all supervisor-level files, but the Linux
+device-tree binding requires one IMSIC node per privilege level, making it de facto mandatory.
+
+### Inside a per-cluster global aperture (32 MiB)
+
+| Offset | Size | Region |
+| --- | --- | --- |
+| `+0x000_0000` | 1 MiB | Externally-visible per-cluster MMIO — global alias of the IMSIC/APLIC pages |
+| `+0x010_0000` | 24 MiB | Window region, non-cacheable |
+| `+0x190_0000` | 7 MiB | Reserved — mailbox, external debug |
+
+**The scratchpad has no global aperture.** There is no address another cluster or external master can
+emit that reaches it. That unreachability is a property of the map's shape rather than a permission
+check that could be misconfigured.
+
+**Self-window turnaround** falls out of D23: a cluster reaching its own window uses the global address
+for its own ID, and the boundary compares `addr[27:25]` against its own cluster ID and services the
+access locally instead of emitting it.
+
+### Decode rules required
+
+| | Rules | External AXI subordinate ports |
+| --- | --- | --- |
+| One cluster | 3 | 1 |
+| Eight clusters | 3 | 2 |
+
+Two local-alias rules plus one rule covering `0x5000_0000`–`0x5FFF_FFFF`, with self-turnaround decided
+inside the cluster boundary. **Additional clusters cost no additional rules.**
+
+### Open
+
+- Whether phase 1 should decode cluster 0's own aperture and self-turnaround to a local
+  non-cacheable region, rather than leaving the range unimplemented.
+- `Cva6ExtCieLength` semantics: whether it is measured from the external window base, and what CIE
+  actually asserts.
+- Window region sizing, and the 8 MiB array, both need checking against a chosen FPGA part's
+  on-chip memory; and the 1 MiB way granularity against `axi_llc`'s legal configurations.
