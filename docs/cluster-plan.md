@@ -83,6 +83,9 @@ This is a single coherent cluster and nothing more.
   phase 1.
 - **D16 — Hart 0 boots; harts 1–3 park in `wfi` awaiting OpenSBI HSM start.** Letting the other
   three free-run into the kernel produces corruption that looks random and is painful to diagnose.
+  **The boot hart is not hart 0 by default** — observed on QEMU `virt` booting on hartid 3 in one
+  configuration and hartid 0 in another, from identical images. Whichever hart arrives first wins
+  unless something constrains it, so this is a platform obligation, not an assumption.
 - **D17 — Instantiate the RISC-V debug module and JTAG DTM from the start; defer bring-up to FPGA.**
   Instantiating is nearly free and avoids re-plumbing hart selection later (another `NrHarts`
   consumer). Driving it under Verilator means modelling JTAG transport and running OpenOCD against
