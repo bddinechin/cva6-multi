@@ -167,6 +167,15 @@ This is a single coherent cluster and nothing more.
   `0x0C00_0000` that would collide with Cheshire's. D6 integrates `ace_ccu_top_intf`, not the Culsans
   platform.
 
+### Scope of this repository
+
+- **D31 — This repository is documentation only, permanently.** The implementation depends on IP
+  hosted where an external reader cannot reach it, so nothing here could ever be built from a public
+  clone, no matter how it were arranged. Rather than publish something that looks buildable and is
+  not, the public copy carries the design record alone: the decisions, the address map, the AIA
+  survey, the component list and the milestones, each of which stands on its own. There is no RTL
+  here and no Bender manifest, and there will not be.
+
 ---
 
 ## 3. Component list
