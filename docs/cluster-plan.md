@@ -331,9 +331,32 @@ This is a single coherent cluster and nothing more.
     generation, and no precedent: every known integration sets slave ports equal to the core count.
     Adding a port also widens IDs downstream, since `ccu_fsm` recovers the initiator index from an ID
     prefix sized `$clog2(NoMstPorts)`.
-  - **Invalidate rather than update is sufficient**: the destination takes one miss, refilled from
-    its own L2 or scratchpad rather than across the fabric, so the store-latency-for-load-latency
-    trade largely survives.
+  - **This is invalidation, which is what comparable designs do.** A cluster-level directory-based
+    coherence unit sending invalidation messages to the L1Ds on an in-domain store is the established
+    shape of this capability; the version here reaches the same semantics by **broadcast snoop**
+    rather than by a directory. The difference is scalability, not behaviour: broadcast costs a snoop
+    to every cache on every in-domain store, which is why four cores is the validated envelope, while
+    a directory invalidates only the caches holding the line. So the directory-CCU path that would
+    raise the cluster toward sixteen cores (D25) converges on that established structure, and the
+    broadcast form is its small-scale version.
+  - Either way the destination takes a miss and refills from its own L2 or scratchpad rather than
+    across the fabric, which preserves the store-latency-for-load-latency trade.
+  - **The snoop responder shim, concretely.** The added port needs an ACE snoop (AC/CR) responder,
+    because the slave-port and snoop-port arrays share one index space and `ccu_fsm` waits on
+    `ac_ready != '1` and `cr_valid != '1` across every port. The agent has no cache, so the correct
+    answer to every snoop is "I do not hold this line", unconditionally:
+    - **AC**: hold `ac_ready` asserted and accept every snoop type without decoding it. CVA6's own
+      responder recognises only `CleanInvalid`, `ReadShared`, `ReadOnce` and `ReadUnique`; a cacheless
+      port has no reason to distinguish them.
+    - **CR**: for each accepted AC return one `cr_valid` with an all-zero response — no data
+      transfer, no error, not shared, not passing dirty, not previously unique. Take the exact field
+      names from the snoop package rather than from this description.
+    - **CD**: never driven, since `dataTransfer = 0` means no cache-data beats follow.
+    - **Depth**: one outstanding snoop suffices if AC is accepted only while no CR is pending;
+      otherwise the AC-to-CR path needs a small FIFO. Either way it is a few tens of lines.
+    - Tie off `rack`/`wack`, which `ACE_BUS` carries but `ccu_fsm` does not use.
+    The shim is not specific to remote stores — it is what **any** non-caching master needs to sit on
+    this CCU — so it is worth writing as a reusable module rather than inline.
   - **Do not upgrade to the newer CCU expecting better.** The `devel` generation is a pipelined
     rewrite with a real snoop filter and a more complete ACE package, yet `ace_is_write_unique` is
     **never called** in it — a `WriteUnique` would reach memory un-snooped. Its AR path does decode
