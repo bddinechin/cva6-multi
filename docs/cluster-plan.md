@@ -238,6 +238,36 @@ This is a single coherent cluster and nothing more.
   - **It does not relax D18.** Verilating the cluster inside Renode still leaves the surrounding
     model non-architectural about memory ordering, so litmus evidence must come from a flow where
     the whole path is RTL.
+  - **VCML is the stronger SystemC route, and probably the better bridge overall.**
+    [machineware-gmbh/vcml](https://github.com/machineware-gmbh/vcml) is an Apache-2.0 SystemC/TLM-2.0
+    modelling library, actively maintained — pushed 2026-10-20, 205 stars, one open issue, CI across
+    Linux, Windows and macOS with ASan, lint and coverage. That is a different standard of upkeep
+    from the other SystemC options surveyed.
+    - **Its RISC-V peripheral set reads like a shopping list for this project**: `models/riscv/`
+      carries `clint.h` and `aclint.h` and `plic.h` for D8 today, `aplic.h` for the AIA
+      reconvergence path, and an `iommu.h` for later. The surrounding platform would
+      be largely off the shelf rather than written.
+    - **Verilator emits SystemC modules natively** (`verilator --sc`), so a SystemC platform is the
+      natural host for Verilated RTL — more natural than Renode's C# `CoSimulationPlugin`. This
+      solves the missing-CPU problem and the RTL-bridge problem with one decision, and it is why
+      VCML displaces Renode as the preferred route for this step.
+    - **It also supplies timing annotation**, which is wanted here rather than feared: D26's
+      scratchpad-versus-L2 split and the window sizing both lack any basis, and a model that can
+      produce numbers is the only way to put one under them.
+    - **Three gaps, none fatal but all real.** VCML is a library, not a platform, so the VP is built
+      rather than configured. It contains **no CPU** — `core/processor.h` is abstract
+      (`virtual void simulate(size_t) = 0`) and nothing in the organisation implements RISC-V, because
+      MachineWare's business is SIM-V, their commercial ISS; a Verilated core is what fills that hole.
+      There is **no 16550** among its serial models (`sifive`, `pl011`, `cdns`, `uartlite`, `nrf51`),
+      and Cheshire's UART is 16550-compatible, so one would have to be written. And `aplic.h` ships
+      without an `imsic.h`, so its AIA support covers direct delivery only.
+    - **Open before this becomes load-bearing:** MachineWare's licensing. The library is Apache-2.0
+      but they advertise a separate "VCML community" offering, which usually signals a dual-licence
+      arrangement worth understanding before depending on it.
+    - **Not a replacement for either working vehicle.** Renode boots the map at 14/14 and the QEMU
+      machine at 15/15 in under 10 s. Building a VP from a library, writing a 16550 and sourcing a
+      core, to reach a capability already in hand, is not the trade. This is recorded for when the
+      RTL exists and is pinned (D12, D13).
   - Recorded because it was under-rated when the vehicles were first ranked: Renode's
     co-simulation was assumed to cover peripherals only.
 
