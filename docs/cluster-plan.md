@@ -271,6 +271,45 @@ This is a single coherent cluster and nothing more.
   - Recorded because it was under-rated when the vehicles were first ranked: Renode's
     co-simulation was assumed to cover peripherals only.
 
+- **D37 — The address map has one machine-readable source, and every view is generated from it.**
+  `sw/addrmap/cva6-multi-map.json` is authoritative; `sw/addrmap/gen.py` emits the device tree, the
+  Renode platform and the QEMU board's memmap header. `gen.py --check` prints a diff and fails if
+  any generated file is stale, which belongs in CI next to the strip-list grep (D34).
+  - **It exists because the map drifted and the drift was expensive.** The same map lived by hand in
+    four places: prose, the device tree, the Renode platform and a C table. The device tree declared
+    `reg-shift = <2>` on the UART while the QEMU model was byte-spaced, which cost several debugging
+    rounds and produced a confidently wrong conclusion along the way. The failing access was a store
+    fault at `base+0xC`; under Renode the same mismatch only produced warnings, so the louder model
+    found it and the quieter one hid it.
+  - **Properties belong in the source, not just addresses.** `reg_shift`, the 1 MHz timebase, the
+    PLIC's source count and contexts-per-hart, the UART IRQ, and the ISA extension list are all
+    things two consumers must agree on, and each is now stated once. The bitmanip list matters most:
+    per D7, a model that does not implement what the tree advertises dies silently.
+  - **Reserved span and populated size are distinct fields.** `size` is address space, `populated`
+    is backing store, and they differ for the scratchpad: 8 MiB of array inside 64 MiB reserved
+    (D26). Consumers that instantiate memory use `populated`; the device tree's `reserved-memory`
+    node uses it too. This distinction came out of the generator getting it wrong first, which only
+    the diff against known-good output caught.
+  - **Stdlib only, JSON not YAML.** No pyyaml here and Python is 3.10 with no `tomllib`. A generator
+    that needs a dependency installed is a generator that will not run on the machine that needs it.
+  - **This is the lightweight precursor to D38's heavier flows**, not a competitor to them. It owns
+    addresses and cross-consumer properties. It does not describe structure, connectivity or register
+    fields, and is not trying to.
+- **D38 — SystemRDL when the first register block is ours; IP-XACT when RTL assembly starts.**
+  Neither yet, and the order matters.
+  - **SystemRDL via PeakRDL, at the first self-defined register block.** Cheshire is already
+    PeakRDL-based: its map lives in a generated `cheshire_addrmap_pkg.sv` built from `cheshire.rdl`.
+    So the choice is not whether to adopt SystemRDL but whether to align with the platform's existing
+    flow or maintain something parallel to it. The trigger has not arrived: every register block in
+    D10's peripheral set belongs to adopted IP, and ours are all still reserved address space — the
+    iDMA config, the cluster `axi_llc` config, and the QoS/regulator registers inside the
+    `0x4000_0000` alias. Extend `cheshire.rdl`'s conventions rather than starting a second flow.
+    PeakRDL is not installed; it is a one-line nix addition when wanted.
+  - **IP-XACT at D6, not before.** IEEE 1685 describes structure and connectivity for IP
+    integration, and its value appears when assembling real IP with real interfaces — which is
+    exactly the Culsans-into-Cheshire join, and that work has not started. Ten regions and four harts
+    do not need it; the ceremony would exceed the content. Adoption cost here is unusually low, given existing in-house IEEE 1685-2022 modelling of a comparable topology.
+
 ---
 
 ## 3. Component list
