@@ -310,6 +310,54 @@ This is a single coherent cluster and nothing more.
     exactly the Culsans-into-Cheshire join, and that work has not started. Ten regions and four harts
     do not need it; the ceremony would exceed the content. Adoption cost here is unusually low, given existing in-house IEEE 1685-2022 modelling of a comparable topology.
 
+### Remote store programming
+
+- **D39 — Coherent remote stores are reachable as an integration, not a coherence-unit
+  modification. D5 stands.** Established from the RTL: the Culsans CCU already performs
+  remote-store-invalidate for `WriteUnique`, and the path is exercised rather than dead code.
+  - **The mechanism.** `ace_trs_dec.sv` decodes *negatively* — the only writes bypassing the CCU are
+    `WriteBack` and `WriteNoSnoop`, so **everything else on AW enters it**, `WriteUnique` and
+    `WriteLineUnique` included. `ccu_fsm` then goes `DECODE_W → SEND_INVALID_W` unconditionally,
+    broadcasting `CleanInvalid` to every non-initiating master, absorbing any dirty copy via a
+    writeback, and only then landing the initiator's write with AW/W forwarded verbatim — so byte
+    strobes and sub-cacheline sizes survive, and the ordering is correct.
+  - **CVA6 already emits it**: `miss_handler.sv` selects `WRITE_UNIQUE` for stores that are
+    uncacheable but inside a shareable region.
+  - **The integration cost.** Set `NoSlvPorts = cores + 1` and attach the inbound-write agent to the
+    extra port. The CCU's slave-port and snoop-port arrays share one index space and `ccu_fsm` waits
+    on `ac_ready != '1` / `cr_valid != '1` across all ports, so the new port needs a **trivial AC/CR
+    snoop responder** — accept every AC, answer CR with `dataTransfer=0` — or the FSM deadlocks on
+    the first shareable transaction from any core. There is no ACE-Lite port type in either CCU
+    generation, and no precedent: every known integration sets slave ports equal to the core count.
+    Adding a port also widens IDs downstream, since `ccu_fsm` recovers the initiator index from an ID
+    prefix sized `$clog2(NoMstPorts)`.
+  - **Invalidate rather than update is sufficient**: the destination takes one miss, refilled from
+    its own L2 or scratchpad rather than across the fabric, so the store-latency-for-load-latency
+    trade largely survives.
+  - **Do not upgrade to the newer CCU expecting better.** The `devel` generation is a pipelined
+    rewrite with a real snoop filter and a more complete ACE package, yet `ace_is_write_unique` is
+    **never called** in it — a `WriteUnique` would reach memory un-snooped. Its AR path does decode
+    `CleanInvalid` and `MakeInvalid`, and it carries a `hasUntrackedArId` field documented as "a port
+    without a snoopable cache", so on that generation the viable shape is write plus an explicit
+    AR-channel invalidate.
+  - **Three latent hazards in the shipped CCU**, dormant only because CVA6 never emits the offending
+    transactions, and live the moment a new master appears. **`Evict` would hang it** — not exempted
+    by the decoder, so it enters the write path and waits for W beats that never come.
+    `WriteLineUnique` gets `CleanInvalid` where the specification says `MakeInvalid`, costing a
+    needless writeback. `WriteClean` and `WriteEvict` also take the invalidate-then-write path, wrong
+    for `WriteClean`. A new agent must emit `WriteUnique` and nothing else.
+  - **Consequence for D9: HPDcache has no coherence at all** — no AC/CR channel, no snoop responder,
+    no shared/exclusive state — and evicts clean lines **silently**, so an external snoop filter in
+    front of it is permanently conservative. The HPDcache migration would lose this capability as
+    described. Its alternative hook is `mem_resp_read_inval_i`, a working external cacheline-
+    invalidation input built for OpenPiton's L15 and currently hard-tied to zero on the AXI path with
+    the comment *"AXI NoC doesn't support invalidations"*. That is in-band invalidation rather than
+    ACE snooping, and its fan-out, back-pressure and refill-FIFO sizing are unsolved.
+  - **No prior art.** No open-source RISC-V design implements remote store programming, and none does
+    ACE IO-coherent DMA. The nearest precedents use other protocols: Rocket Chip's TileLink probes,
+    ESP's MESI directory with ACE used only for L1 invalidation, and OpenPiton's L15 in-band
+    invalidations. PULP's shared-L1 clusters sidestep it by making L1 a scratchpad, not a cache.
+
 ---
 
 ## 3. Component list
