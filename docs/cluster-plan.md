@@ -412,16 +412,18 @@ of a stock Cheshire** — D7 requires explicitly turning it on.
 
 ## 7. Required tooling
 
-| Tool | Why |
+| Tool | For |
 | --- | --- |
-| Verilator ≥ 5 | Phase 1 simulation. Verilator 4.x is too old for current CVA6 flows |
-| `bender` | Dependency resolution for Cheshire and Culsans |
-| `dtc` | Device tree compilation; Linux will not boot without it |
-| RISC-V GCC ≥ 12 | GCC 11 and earlier reject the ratified `zba`/`zbb`/`zbs` names, so D7 makes this a hard floor |
-| Linux-target RISC-V toolchain | Kernel and userspace |
-| `qemu-system-riscv64` | Software pre-flight before RTL simulation |
-| Spike | Step-and-compare (D19) |
+| `qemu-system-riscv64` >= 11.1 | The generic `virt` pre-flight and the custom board (D35) |
+| `dtc` | Compiling the generated device tree (D37) |
+| Renode >= 1.17 | The declarative platform (D35) |
+| Linux-target RISC-V toolchain | Kernel and userspace; Buildroot builds its own |
+| Verilator >= 5 | D2 phase 1, and D36's co-simulation. Verilator 4.x is too old for current CVA6 flows |
+| Spike | Tandem verification (D19) |
 | `openocd` | Phase 2 debug bring-up |
+| `bender` | Resolving Cheshire and Culsans dependencies. No distro package and no cargo toolchain by default |
+| RISC-V GCC >= 12 | `riscv-tests` and bare-metal stages. GCC 11 and earlier reject the ratified `zba`/`zbb`/`zbs` names, which D7 makes a hard floor |
+| PeakRDL | SystemRDL register blocks, when D38's trigger arrives |
 
 Device tree note: the single `riscv,isa` string is deprecated in favour of `riscv,isa-base` plus a
 `riscv,isa-extensions` array. Linux will not enable its Zbb-optimised string routines or report the
