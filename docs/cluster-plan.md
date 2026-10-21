@@ -280,23 +280,62 @@ This is a single coherent cluster and nothing more.
       it is best at: **one ISS, two jobs**, with the crude half replaced. The speed cost is real
       though — Spike runs roughly 10 to 30 times slower than QEMU TCG, so this is a
       fidelity-and-structure platform, not the one to iterate software on daily.
-    - **Two gaps remain.** VCML is a library, not a platform, so the VP is assembled rather than
-      configured. There is **no 16550** among its serial models (`sifive`, `pl011`, `cdns`,
-      `uartlite`, `nrf51`), and Cheshire's UART is 16550-compatible, so one would have to be written.
-      And `aplic.h` ships without an `imsic.h`, so its AIA support covers direct delivery only.
+    - **Correction: the 16550 is there, and so is the right variant.** An earlier version of this
+      decision recorded that VCML had **no 16550** among its serial models and that one would have
+      to be written. That was inferred from the header *filenames* in `models/serial/`
+      (`sifive`, `pl011`, `cdns`, `uartlite`, `nrf51`) — the same mistake in method as reading a
+      Renode warning as a model deficiency: absence of a matching filename taken as absence of the
+      model. `models/serial/uart.h` declares a `uart` base plus three variants, and the third is
+      the one this cluster needs:
+
+      | model | `REG_SIZE` | FIFOs | matches |
+      | --- | --- | --- | --- |
+      | `vcml::serial::uart8250` | 1 | 1 | byte-spaced 8250 |
+      | `vcml::serial::uart16550` | 1 | 16 | byte-spaced 16550 |
+      | `vcml::serial::uart16550x32` | **4** | 16 | **ours**, `reg_shift = 2` |
+
+      So the peripheral set is complete, not nearly complete, and the only remaining hole is the
+      core. The three-way choice is also a fresh instance of the D37 trap in an unusually inviting
+      form — `uart16550` is the obvious name and the wrong model — which is why the generator now
+      emits the model name rather than leaving it to be remembered.
+    - **One gap remains besides the core.** VCML is a library, not a platform, so the VP is
+      assembled rather than configured. And `aplic.h` ships without an `imsic.h`, so its AIA
+      support covers direct delivery only.
     - **Open before this becomes load-bearing:** MachineWare's licensing. The library is Apache-2.0
       but they advertise a separate "VCML community" offering, which usually signals a dual-licence
       arrangement worth understanding before depending on it.
     - **Not a replacement for either working vehicle.** Renode boots the map at 14/14 and the QEMU
-      machine at 15/15 in under 10 s. Building a VP from a library, writing a 16550 and sourcing a
-      core, to reach a capability already in hand, is not the trade. This is recorded for when the
-      RTL exists and is pinned (D12, D13).
+      machine at 15/15 in under 10 s. Assembling a VP from a library and sourcing a core, to reach a
+      capability already in hand, is not the trade for this repository's purposes. What makes it
+      worth building anyway is the next bullet.
+  - **The SystemC platform is owned outside this repository**, by people with prior working
+    experience of VCML — which is the single largest piece of de-risking available to this route,
+    since "assembled rather than configured" is a cost that falls on someone who has assembled one
+    before. Three consequences:
+    - **The address map must not fork.** D37 exists because the same numbers lived by hand in four
+      places and drifted. A SystemC platform is a fifth consumer with the same traps available, so
+      `sw/addrmap/gen.py` now emits a VCML header and a VCML property file from the same JSON
+      source, and a cross-check asserts the VCML and QEMU views still describe one machine using
+      only a C++ compiler — no VCML or SystemC install needed, so it runs anywhere
+      `gen.py --check` runs. The property **keys** follow the avp64 convention and are a proposal to
+      be renamed; the **values** are the contract.
+    - **The timing discipline stops being structural.** D35 notes that all three current vehicles
+      are functional only and produce no timing at all. A timing-annotated VP removes that property.
+      Here that is wanted — D26's partition and the window sizing have no basis — but it means any
+      downstream consumer that must not take sizing numbers from a model can no longer rely on the
+      platform being incapable of producing them. That reverts to a rule people follow rather than
+      one the tooling enforces.
+    - **It is a cross-team dependency**, structurally like the tracked Culsans fork (D12, D13):
+      owned elsewhere, consumed here, and needing its interface pinned rather than assumed. The map
+      is pinned as of this decision; the CPU choice, the SystemC version and the platform's module
+      hierarchy are not.
   - Recorded because it was under-rated when the vehicles were first ranked: Renode's
     co-simulation was assumed to cover peripherals only.
 
 - **D37 — The address map has one machine-readable source, and every view is generated from it.**
   `sw/addrmap/cva6-multi-map.json` is authoritative; `sw/addrmap/gen.py` emits the device tree, the
-  Renode platform and the QEMU board's memmap header. `gen.py --check` prints a diff and fails if
+  Renode platform, the QEMU board's memmap header and the VCML/SystemC platform's address map
+  (D36). `gen.py --check` prints a diff and fails if
   any generated file is stale, which belongs in CI next to the strip-list grep (D34).
   - **It exists because the map drifted and the drift was expensive.** The same map lived by hand in
     four places: prose, the device tree, the Renode platform and a C table. The device tree declared
@@ -304,6 +343,11 @@ This is a single coherent cluster and nothing more.
     rounds and produced a confidently wrong conclusion along the way. The failing access was a store
     fault at `base+0xC`; under Renode the same mismatch only produced warnings, so the louder model
     found it and the quieter one hid it.
+  - **A generated view can carry a model choice, not only numbers.** Where a map property determines
+    which model is correct, the generator emits the model name too: `reg_shift = 2` selects
+    `vcml::serial::uart16550x32` over the identically-named-but-byte-spaced `uart16550`, as a macro
+    the platform declares its member through. That converts an agreement that has to be remembered
+    into one the compiler holds. It is the same property that drifted in the first place.
   - **Properties belong in the source, not just addresses.** `reg_shift`, the 1 MHz timebase, the
     PLIC's source count and contexts-per-hart, the UART IRQ, and the ISA extension list are all
     things two consumers must agree on, and each is now stated once. The bitmanip list matters most:
