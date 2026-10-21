@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: Apache-2.0
+// D1 — cluster internals. Grounded in the component list (§3) and D6, D26, D39.
+// Rendered by ./build-diagrams.sh. Every node must be shape=box or the subset check fails.
+digraph D1 {
+  rankdir=TB;
+  bgcolor="white";
+  compound=true;
+  fontname="Arial";
+  labelloc="t";
+  label="D1 — cva6-multi cluster internals";
+  node [shape=box, style=filled, fillcolor="#ffffff", color="#333333",
+        fontname="Arial", fontsize=11, margin="0.12,0.07"];
+  edge [color="#555555", fontname="Arial", fontsize=9];
+
+  // ---- cores, each with its private write-back caches (ACE snoop lives in the L1D)
+  subgraph cluster_cores {
+    label="4 × CVA6  —  RV64GC+B, Sv39, M/S/U";
+    fontname="Arial"; fontsize=10; fontcolor="#666666";
+    color="#aaaaaa"; style=dashed;
+    c0 [label="core 0\nL1I | L1D"];
+    c1 [label="core 1\nL1I | L1D"];
+    c2 [label="core 2\nL1I | L1D"];
+    c3 [label="core 3\nL1I | L1D"];
+  }
+
+  // ---- the coherence unit, adopted unmodified (D6, D30)
+  ccu [label="Culsans CCU\nMOESI over AMBA ACE, broadcast snoop\nNoSlvPorts = 4 + 1  (D39)",
+       fillcolor="#eaf2f8", color="#1a5276"];
+
+  // ---- what D39 adds: one extra slave port and the shim that keeps ccu_fsm from deadlocking
+  shim [label="snoop responder shim\nAC accept / CR dataTransfer=0\nrtl/snoop_responder_cacheless.sv",
+        fillcolor="#eaf2f8", color="#1a5276"];
+  inbound [label="inbound write agent\nWriteUnique only",
+           fillcolor="#eaf2f8", color="#1a5276", style="filled,dashed"];
+
+  // ---- platform, all via Cheshire
+  subgraph cluster_platform {
+    label="Cheshire platform";
+    fontname="Arial"; fontsize=10; fontcolor="#666666";
+    color="#aaaaaa"; style=dashed;
+    xbar [label="AXI4 interconnect"];
+    llc  [label="axi_llc  —  8 MiB, 8 ways × 1 MiB\nscratchpad / L2 partition (D26)"];
+    clint [label="CLINT\nmtime, mtimecmp, msip"];
+    plic  [label="PLIC\n8 contexts (M+S per hart)"];
+    uart  [label="UART 16550\nword-spaced, reg_shift = 2"];
+    dbg   [label="riscv-dbg + JTAG DTM\ninstantiated, bring-up deferred"];
+    idma  [label="iDMA"];
+    rom   [label="boot ROM\nbypassed in phase 1"];
+  }
+
+  mem [label="main memory\nbehavioural AXI in phase 1", style="filled,dashed", color="#888888"];
+
+  c0 -> ccu [label="ACE"];
+  c1 -> ccu;
+  c2 -> ccu;
+  c3 -> ccu;
+  inbound -> shim [style=dashed];
+  shim -> ccu [label="AC / CR"];
+  ccu -> xbar;
+  xbar -> llc;
+  llc  -> mem;
+  xbar -> clint;
+  xbar -> plic;
+  xbar -> uart;
+  xbar -> dbg;
+  xbar -> idma;
+  xbar -> rom;
+  // Interrupts terminate at the harts, not at the CCU: PLIC drives meip/seip per context
+  // and CLINT drives mtip/msip per hart. Drawn to the core group to keep 8 edges off the page.
+  plic  -> c3 [lhead=cluster_cores, label="meip / seip\n2 contexts per hart",
+               style=dotted, constraint=false];
+  clint -> c0 [lhead=cluster_cores, label="mtip / msip",
+               style=dotted, constraint=false];
+}
