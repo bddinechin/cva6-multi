@@ -254,13 +254,36 @@ This is a single coherent cluster and nothing more.
     - **It also supplies timing annotation**, which is wanted here rather than feared: D26's
       scratchpad-versus-L2 split and the window sizing both lack any basis, and a model that can
       produce numbers is the only way to put one under them.
-    - **Three gaps, none fatal but all real.** VCML is a library, not a platform, so the VP is built
-      rather than configured. It contains **no CPU** — `core/processor.h` is abstract
-      (`virtual void simulate(size_t) = 0`) and nothing in the organisation implements RISC-V, because
-      MachineWare's business is SIM-V, their commercial ISS; a Verilated core is what fills that hole.
-      There is **no 16550** among its serial models (`sifive`, `pl011`, `cdns`, `uartlite`, `nrf51`),
-      and Cheshire's UART is 16550-compatible, so one would have to be written. And `aplic.h` ships
-      without an `imsic.h`, so its AIA support covers direct delivery only.
+    - **Correction: there is an open-source RISC-V CPU route, and it is Spike.** An earlier version of
+      this decision recorded that VCML "contains no CPU" and concluded the hole needed a commercial
+      ISS or a Verilated core. The first half holds for the library — `core/processor.h` is abstract,
+      `virtual void simulate(size_t) = 0` — but the conclusion was wrong. MachineWare's curated
+      community list carries **`spike-vp`**, Apache-2.0, "a VP built around the Spike RISC-V
+      simulator… fast enough to run Linux with an interactive command line". The gap is **narrower
+      than recorded, though not closed**:
+      - Its own README calls it **"a proof of concept"**; last pushed **February 2024**.
+      - It builds against **three personal forks** — of VCML, of SystemC 2.3.3, and of
+        `riscv-isa-sim` on a `spike-for-systemc` branch. Upstream Spike does **not** work as a VCML
+        processor as-is; the fork *is* the integration.
+      - So adopting it means taking a stale proof of concept with a patched Spike, or redoing the
+        integration against current upstreams. Neither is a drop-in, but both are far cheaper than
+        the commercial licence the earlier record implied was necessary.
+      - Sibling precedent: **AVP64** (MIT) is an ARM multi-core VCML platform built on **QEMU**,
+        running Xen and Linux — so wrapping a translating core rather than an interpreter is an
+        established pattern here. A QEMU-based RISC-V VCML platform looks plausible and simply does
+        not exist yet.
+    - **This resolves an earlier objection rather than contradicting it.** D35's sequence argued
+      against making Spike serve both the virtual platform and D19's tandem verification, on the
+      grounds it would yield "a slow VP and a less clean reference model". That objection was about
+      Spike's *platform* being crude — compile-time `#define` addresses, a minimal device set — not
+      about its core. With VCML supplying the peripherals, Spike need only be the ISA, which is what
+      it is best at: **one ISS, two jobs**, with the crude half replaced. The speed cost is real
+      though — Spike runs roughly 10 to 30 times slower than QEMU TCG, so this is a
+      fidelity-and-structure platform, not the one to iterate software on daily.
+    - **Two gaps remain.** VCML is a library, not a platform, so the VP is assembled rather than
+      configured. There is **no 16550** among its serial models (`sifive`, `pl011`, `cdns`,
+      `uartlite`, `nrf51`), and Cheshire's UART is 16550-compatible, so one would have to be written.
+      And `aplic.h` ships without an `imsic.h`, so its AIA support covers direct delivery only.
     - **Open before this becomes load-bearing:** MachineWare's licensing. The library is Apache-2.0
       but they advertise a separate "VCML community" offering, which usually signals a dual-licence
       arrangement worth understanding before depending on it.
