@@ -192,6 +192,53 @@ This is a single coherent cluster and nothing more.
   `0x0C00_0000` that would collide with Cheshire's. D6 integrates `ace_ccu_top_intf`, not the Culsans
   platform.
 
+- **D40 — Phase 1 decodes cluster 0's own global aperture and self-turnarounds.**
+  The `0x5000_0000`–`0x5FFF_FFFF` rule exists from the first cluster, and the boundary compares
+  `addr[27:25]` against its own cluster ID and services a match locally rather than leaving the
+  range unimplemented. The decode-rules table in §10 already assumed this, and both virtual
+  platforms have been booting against a map that models it, so this ratifies the state of the work
+  rather than adding to it.
+  - **Why: a decode path first exercised when cluster 1 appears is debugged under the worst
+    conditions available.** Its first exercise would otherwise coincide with the first NoC bring-up,
+    the first cross-cluster coherence traffic and the first multi-cluster interrupt routing — all of
+    which produce the same symptom, a store that does not land. Phase 1 is where that path is cheap
+    to debug because nothing around it is new.
+  - **Why: it makes the coherent-remote-store programming model testable on one cluster.** Per D39
+    `ccu_fsm` goes `DECODE_W → SEND_INVALID_W` unconditionally and broadcasts `CleanInvalid` to
+    every *non-initiating* master. So core 0 storing to its own cluster's window, turned around
+    locally, invalidates cores 1–3's L1D copies: the full semantics, one cluster, phase 1.
+    **This does not test the snoop responder shim** — in self-turnaround the initiator is a core on
+    an existing slave port, and the shim only sees traffic when the initiator is the added port. The
+    shim still needs its own integration test with a write agent, as D39 records.
+  - **Why: it tests the property convergence depends on.** D24's point is that one kernel image and
+    one device tree run on any cluster unchanged, and self-turnaround is what makes "a cluster's own
+    aperture" resolve uniformly. Exercising it on one cluster is a cheap test of the mechanism the
+    whole convergence story rests on.
+  - **The argument against, which is real.** An unimplemented range fails loudly; a decoded one
+    fails quietly. With the aperture decoded, software that uses the global alias where it should
+    use the cluster-local alias **still works** in phase 1 — slower and non-cacheable, but correct —
+    and then behaves differently once the NoC is real. Left unimplemented, that bug is a decode
+    error on first execution. Accepted, and mitigated outside the decode: the two aliases already
+    differ in cacheability, and the virtual platforms should assert when private data is reached
+    through the global alias. That recovers most of the strictness without deferring the decode.
+  - **Three sub-decisions this forces, which must not stay implicit:**
+    1. **The window is non-cacheable *and* shareable.** Not a detail: `miss_handler.sv` selects
+       `WRITE_UNIQUE` only for stores that are uncacheable *but inside a shareable region*, and
+       `WRITE_NO_SNOOP` otherwise. `WriteNoSnoop` bypasses the CCU entirely and invalidates nothing,
+       so without the shareable attribute the loopback above degrades silently — the store still
+       lands, and nothing announces that no invalidation happened. The cost of shareable is that
+       every core store to the window enters the CCU and broadcasts an invalidate, which is the
+       intended semantics rather than a side effect.
+    2. **An access to clusters 1–7's apertures in phase 1 takes an error response**, not a silent
+       drop. This is the loud-failure principle applied where it costs nothing: in phase 1 those
+       addresses can only be reached by mistake.
+    3. **The turnaround is serviced at the boundary, not looped out and back through the inbound
+       write port.** Looping is tempting because it would exercise the shim too, but a request loop
+       through one boundary can deadlock when outbound and inbound share buffering, and the shim has
+       its own test. Rejected on that basis rather than overlooked.
+  - **Dependency worth naming:** the window inherits non-cacheable from sitting outside the CIE
+    region, which holds only if `Cva6ExtCieLength = 0x0400_0000` means what D24 assumes. That
+    semantic is still unconfirmed, so this decision is coupled to it.
 ### Scope of this repository
 
 - **D31 — This repository is documentation only, permanently.** The implementation depends on IP
@@ -619,7 +666,10 @@ check that could be misconfigured.
 
 **Self-window turnaround** falls out of D23: a cluster reaching its own window uses the global address
 for its own ID, and the boundary compares `addr[27:25]` against its own cluster ID and services the
-access locally instead of emitting it.
+access locally instead of emitting it. Same mechanism, no special case. **Present from phase 1 per
+D40**, serviced at the boundary rather than looped through the inbound write port. The window is
+non-cacheable **and shareable** — the second attribute is what makes a core's store to it a
+`WriteUnique` the CCU invalidates on, rather than a `WriteNoSnoop` that quietly does nothing.
 
 ### Decode rules required
 
@@ -633,8 +683,6 @@ inside the cluster boundary. **Additional clusters cost no additional rules.**
 
 ### Open
 
-- Whether phase 1 should decode cluster 0's own aperture and self-turnaround to a local
-  non-cacheable region, rather than leaving the range unimplemented.
 - `Cva6ExtCieLength` semantics: whether it is measured from the external window base, and what CIE
   actually asserts.
 - Window region sizing, and the 8 MiB array, both need checking against a chosen FPGA part's
