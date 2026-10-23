@@ -148,9 +148,9 @@ Every acronym of three or more capitals used in this document, spelled out and e
 ### Goal and target
 
 - **D1 — Done = SMP Linux to a shell on 4 harts.** Not `riscv-tests` passing, not bare-metal AMP.
-- **D2 — Verilator first, FPGA as phase 2.** Behavioural AXI memory in phase 1. **Amended by
-  D42**: Verilator remains the vehicle for *software* bring-up, but it is no longer the only
-  simulator — Questa carries the verification suites that Verilator cannot run at all.
+- **D2 — Verilator first, FPGA as phase 2.** Behavioural AXI memory in phase 1. Verilator is the
+  vehicle for *software* bring-up; Questa carries the verification suites Verilator cannot run at
+  all (D42).
 - **D3 — `NrHarts` parameterised throughout, default 4.** Cheap now; expensive to retrofit through
   the interconnect, PLIC contexts, CLINT `mtimecmp` array, debug module hart selection and the
   device tree generator. Also enables a 1-hart bring-up as an easier debug target.
@@ -242,13 +242,13 @@ Every acronym of three or more capitals used in this document, spelled out and e
   by Linux hanging is close to undiagnosable: the symptom appears thousands of instructions after
   the violating interleaving, in kernel code nobody here wrote, on four harts at once. The same bug
   found by a litmus test is a ten-line repro with an exact failing interleaving.
-  - **Amended by D42: the suite exists and we do not write it.** Culsans ships `tests/litmus/`,
+  - **The suite exists and we do not write it (D42).** Culsans ships `tests/litmus/`,
     which builds RISC-V litmus tests with the `diy`/litmus7 generator, runs them on the RTL and
     compares outcomes against **herd7**'s expected set through `create_exp.py`. The remaining work
     is porting it to this cluster — Cheshire platform, our map, the extra slave port — which is a
     much smaller job than building a litmus flow, and a different one. It is Questa-only: the
     Makefile drives `vsim` against a `vopt`-produced `_optimized` top and there is no Verilator
-    harness, so without a licence this gate was not reachable at any price in effort.
+    harness, so without a Questa licence this gate is not reachable at any price in effort.
 - **D19 — Three verification layers before Linux:** `riscv-tests` for the single-hart baseline,
   Spike step-and-compare for per-hart divergence, litmus for coherence.
   - **D42 adds a fourth below them**: Culsans' own unit suite, roughly 35 tests of which a third
@@ -438,14 +438,11 @@ Every acronym of three or more capitals used in this document, spelled out and e
     - **Verilator emits SystemC modules natively** (`verilator --sc`), so a SystemC platform is the
       natural host for Verilated RTL — more natural than Renode's C# `CoSimulationPlugin`. That is
       still why VCML displaces Renode for this step.
-    - **Amended by D42: Verilation is no longer the only way to get RTL into the platform, and it
-      is no longer the best one.** This decision originally claimed `verilator --sc` "solves the
-      missing-CPU problem and the RTL-bridge problem with one decision". Questa co-simulates
-      SystemC/TLM with SystemVerilog RTL in one kernel, so the RTL need not be Verilated at all —
-      and Verilating it would *discard* the four-state simulation and live SVA that D42 is about.
-      Those two decisions were written days apart without noticing they were in tension. The two
-      routes are not the same thing at different speeds; they are different fidelity classes, and
-      D42's ladder places them.
+    - **Verilation is not the only way to get RTL into the platform, nor the best one.** Questa
+      co-simulates SystemC/TLM with SystemVerilog RTL in one kernel, so the RTL need not be
+      Verilated at all — and Verilating it would *discard* the four-state simulation and live SVA
+      that D42 is about. The two routes are not the same thing at different speeds; they are
+      different fidelity classes, and D42's ladder places them.
     - **It also gives the missing-CPU problem a fourth answer: the real CVA6 RTL.** The three
       recorded below are `spike-vp`, a commercial ISS, and a Verilated core. Under Questa the core
       can simply *be* the design, with VCML supplying peripherals over TLM — no ISS at all, highest
@@ -454,39 +451,32 @@ Every acronym of three or more capitals used in this document, spelled out and e
     - **It also supplies timing annotation**, which is wanted here rather than feared: D26's
       scratchpad-versus-L2 split and the window sizing both lack any basis, and a model that can
       produce numbers is the only way to put one under them.
-    - **Correction: there is an open-source RISC-V CPU route, and it is Spike.** An earlier version of
-      this decision recorded that VCML "contains no CPU" and concluded the hole needed a commercial
-      ISS or a Verilated core. The first half holds for the library — `core/processor.h` is abstract,
-      `virtual void simulate(size_t) = 0` — but the conclusion was wrong. MachineWare's curated
-      community list carries **`spike-vp`**, Apache-2.0, "a VP built around the Spike RISC-V
-      simulator… fast enough to run Linux with an interactive command line". The gap is **narrower
-      than recorded, though not closed**:
+    - **There is an open-source RISC-V CPU route, and it is Spike.** The library itself contains
+      no CPU — `core/processor.h` is abstract, `virtual void simulate(size_t) = 0` — but
+      MachineWare's curated community list carries **`spike-vp`**, Apache-2.0, "a VP built around
+      the Spike RISC-V simulator… fast enough to run Linux with an interactive command line". The
+      gap is therefore **narrow, though not closed**:
       - Its own README calls it **"a proof of concept"**; last pushed **February 2024**.
       - It builds against **three personal forks** — of VCML, of SystemC 2.3.3, and of
         `riscv-isa-sim` on a `spike-for-systemc` branch. Upstream Spike does **not** work as a VCML
         processor as-is; the fork *is* the integration.
       - So adopting it means taking a stale proof of concept with a patched Spike, or redoing the
         integration against current upstreams. Neither is a drop-in, but both are far cheaper than
-        the commercial licence the earlier record implied was necessary.
+        a commercial licence.
       - Sibling precedent: **AVP64** (MIT) is an ARM multi-core VCML platform built on **QEMU**,
         running Xen and Linux — so wrapping a translating core rather than an interpreter is an
         established pattern here. A QEMU-based RISC-V VCML platform looks plausible and simply does
         not exist yet.
-    - **This resolves an earlier objection rather than contradicting it.** D35's sequence argued
-      against making Spike serve both the virtual platform and D19's tandem verification, on the
-      grounds it would yield "a slow VP and a less clean reference model". That objection was about
-      Spike's *platform* being crude — compile-time `#define` addresses, a minimal device set — not
-      about its core. With VCML supplying the peripherals, Spike need only be the ISA, which is what
+    - **D35's objection to Spike serving both the virtual platform and D19's tandem verification
+      does not apply to this arrangement.** That objection is about Spike's *platform* being crude
+      — compile-time `#define` addresses, a minimal device set — not about its core. With VCML supplying the peripherals, Spike need only be the ISA, which is what
       it is best at: **one ISS, two jobs**, with the crude half replaced. The speed cost is real
       though — Spike runs roughly 10 to 30 times slower than QEMU TCG, so this is a
       fidelity-and-structure platform, not the one to iterate software on daily.
-    - **Correction: the 16550 is there, and so is the right variant.** An earlier version of this
-      decision recorded that VCML had **no 16550** among its serial models and that one would have
-      to be written. That was inferred from the header *filenames* in `models/serial/`
-      (`sifive`, `pl011`, `cdns`, `uartlite`, `nrf51`) — the same mistake in method as reading a
-      Renode warning as a model deficiency: absence of a matching filename taken as absence of the
-      model. `models/serial/uart.h` declares a `uart` base plus three variants, and the third is
-      the one this cluster needs:
+    - **The 16550 is there, and so is the right variant.** The filenames in `models/serial/`
+      name other devices (`sifive`, `pl011`, `cdns`, `uartlite`, `nrf51`), but
+      `models/serial/uart.h` declares a `uart` base plus three variants, and the third is the one
+      this cluster needs:
 
       | model | `REG_SIZE` | FIFOs | matches |
       | --- | --- | --- | --- |
@@ -494,10 +484,10 @@ Every acronym of three or more capitals used in this document, spelled out and e
       | `vcml::serial::uart16550` | 1 | 16 | byte-spaced 16550 |
       | `vcml::serial::uart16550x32` | **4** | 16 | **ours**, `reg_shift = 2` |
 
-      So the peripheral set is complete, not nearly complete, and the only remaining hole is the
-      core. The three-way choice is also a fresh instance of the D37 trap in an unusually inviting
-      form — `uart16550` is the obvious name and the wrong model — which is why the generator now
-      emits the model name rather than leaving it to be remembered.
+      So the peripheral set is complete and the only remaining hole is the core. The three-way
+      choice is an instance of the D37 trap in an unusually inviting form — `uart16550` is the
+      obvious name and the wrong model — which is why the generator emits the model name rather
+      than leaving it to be remembered.
     - **One gap remains besides the core.** VCML is a library, not a platform, so the VP is
       assembled rather than configured. And `aplic.h` ships without an `imsic.h`, so its AIA
       support covers direct delivery only.
@@ -529,8 +519,8 @@ Every acronym of three or more capitals used in this document, spelled out and e
       owned elsewhere, consumed here, and needing its interface pinned rather than assumed. The map
       is pinned as of this decision; the CPU choice, the SystemC version and the platform's module
       hierarchy are not.
-  - Recorded because it was under-rated when the vehicles were first ranked: Renode's
-    co-simulation was assumed to cover peripherals only.
+  - Renode's co-simulation covers the CPU, not only peripherals, which is what makes it a
+    candidate bridge at all.
 
 - **D37 — The address map has one machine-readable source, and every view is generated from it.**
   `sw/addrmap/cva6-multi-map.json` is authoritative; `sw/addrmap/gen.py` emits the device tree, the
@@ -539,10 +529,9 @@ Every acronym of three or more capitals used in this document, spelled out and e
   any generated file is stale, which belongs in CI next to the strip-list grep (D34).
   - **It exists because the map drifted and the drift was expensive.** The same map lived by hand in
     four places: prose, the device tree, the Renode platform and a C table. The device tree declared
-    `reg-shift = <2>` on the UART while the QEMU model was byte-spaced, which cost several debugging
-    rounds and produced a confidently wrong conclusion along the way. The failing access was a store
-    fault at `base+0xC`; under Renode the same mismatch only produced warnings, so the louder model
-    found it and the quieter one hid it.
+    `reg-shift = <2>` on the UART while the QEMU model was byte-spaced. The failing access was a
+    store fault at `base+0xC`; under Renode the same mismatch produced only warnings, so the louder
+    model found it and the quieter one hid it.
   - **A generated view can carry a model choice, not only numbers.** Where a map property determines
     which model is correct, the generator emits the model name too: `reg_shift = 2` selects
     `vcml::serial::uart16550x32` over the identically-named-but-byte-spaced `uart16550`, as a macro
@@ -555,8 +544,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
   - **Reserved span and populated size are distinct fields.** `size` is address space, `populated`
     is backing store, and they differ for the scratchpad: 8 MiB of array inside 64 MiB reserved
     (D26). Consumers that instantiate memory use `populated`; the device tree's `reserved-memory`
-    node uses it too. This distinction came out of the generator getting it wrong first, which only
-    the diff against known-good output caught.
+    node uses it too.
   - **Stdlib only, JSON not YAML.** No pyyaml here and Python is 3.10 with no `tomllib`. A generator
     that needs a dependency installed is a generator that will not run on the machine that needs it.
   - **One consumer the gate cannot police: a device tree embedded in firmware.** `gen.py --check`
@@ -641,19 +629,18 @@ Every acronym of three or more capitals used in this document, spelled out and e
   - **The committed PDFs are the one thing this does not solve.** The term search skips them
     exactly as it would skip a compressed editor file. They are covered *transitively* — each is
     derived from a text source that is searched, and `--check` asserts the two still agree — but
-    that is an argument, not a search, so the gate now lists every binary file it could not read.
+    that is an argument, not a search, so the gate lists every binary file it could not read.
   - **A diagram that disagrees with the record is worse than none**, because it looks
-    authoritative. Each source names the decisions it depicts. Two errors were caught in the
-    drawing: interrupts terminating at the coherence unit rather than at the harts, and a remote
-    store drawn as completing only when another cache held the line dirty.
+    authoritative. Each source names the decisions it depicts, so a change to those decisions
+    should send the reader here.
 
 - **D42 — Questa 2026.3 is the verification simulator; Verilator stays the software-bring-up
   simulator.** Verilator boots software at a speed Questa cannot approach on a four-core coherent
   cluster; Questa runs the suites Verilator cannot run at all.
-  - **A first version of this decision said "two simulators, two jobs". That is too tidy**, because
-    Questa also co-simulates SystemC and TLM-2.0 alongside SystemVerilog RTL in one kernel — so it
-    can host the platform model as well as the design. The honest shape is a fidelity ladder, and
-    the same platform model serves three of its four rungs:
+  - **The shape is a fidelity ladder, not a split between two simulators.** Questa also
+    co-simulates SystemC and TLM-2.0 alongside SystemVerilog RTL in one kernel, so it can host the
+    platform model as well as the design, and the same platform model serves three of the four
+    rungs:
 
     | rung | what runs | speed | fidelity |
     | --- | --- | --- | --- |
@@ -677,8 +664,8 @@ Every acronym of three or more capitals used in this document, spelled out and e
     assumed, VCML asks for `find_package(SystemC "2.3.0")` and `cxx_std_17`, so unlike `spike-vp`
     it is **not pinned to a fork** and should build against Questa's bundled SystemC. That is build
     integration, not research.
-  - **The largest consequence is that two of Culsans' four verification suites were previously
-    unreachable**, which was not visible until the licences made it worth checking:
+  - **The largest consequence is that two of Culsans' four verification suites are otherwise
+    unreachable:**
 
     | suite | what it is | Verilator harness |
     | --- | --- | --- |
