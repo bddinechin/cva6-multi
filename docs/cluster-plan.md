@@ -308,9 +308,21 @@ This is a single coherent cluster and nothing more.
       reconvergence path, and an `iommu.h` for later. The surrounding platform would
       be largely off the shelf rather than written.
     - **Verilator emits SystemC modules natively** (`verilator --sc`), so a SystemC platform is the
-      natural host for Verilated RTL — more natural than Renode's C# `CoSimulationPlugin`. This
-      solves the missing-CPU problem and the RTL-bridge problem with one decision, and it is why
-      VCML displaces Renode as the preferred route for this step.
+      natural host for Verilated RTL — more natural than Renode's C# `CoSimulationPlugin`. That is
+      still why VCML displaces Renode for this step.
+    - **Amended by D42: Verilation is no longer the only way to get RTL into the platform, and it
+      is no longer the best one.** This decision originally claimed `verilator --sc` "solves the
+      missing-CPU problem and the RTL-bridge problem with one decision". Questa co-simulates
+      SystemC/TLM with SystemVerilog RTL in one kernel, so the RTL need not be Verilated at all —
+      and Verilating it would *discard* the four-state simulation and live SVA that D42 is about.
+      Those two decisions were written days apart without noticing they were in tension. The two
+      routes are not the same thing at different speeds; they are different fidelity classes, and
+      D42's ladder places them.
+    - **It also gives the missing-CPU problem a fourth answer: the real CVA6 RTL.** The three
+      recorded below are `spike-vp`, a commercial ISS, and a Verilated core. Under Questa the core
+      can simply *be* the design, with VCML supplying peripherals over TLM — no ISS at all, highest
+      fidelity, slowest. It is also the natural shape for D19's tandem check, with Spike on the
+      other side.
     - **It also supplies timing annotation**, which is wanted here rather than feared: D26's
       scratchpad-versus-L2 split and the window sizing both lack any basis, and a model that can
       produce numbers is the only way to put one under them.
@@ -483,9 +495,35 @@ This is a single coherent cluster and nothing more.
     store drawn as completing only when another cache held the line dirty.
 
 - **D42 — Questa 2026.3 is the verification simulator; Verilator stays the software-bring-up
-  simulator.** Two simulators, two jobs, the same split as D36's "one ISS, two jobs". Verilator
-  boots software at a speed Questa cannot approach on a four-core coherent cluster; Questa runs
-  the suites Verilator cannot run at all.
+  simulator.** Verilator boots software at a speed Questa cannot approach on a four-core coherent
+  cluster; Questa runs the suites Verilator cannot run at all.
+  - **A first version of this decision said "two simulators, two jobs". That is too tidy**, because
+    Questa also co-simulates SystemC and TLM-2.0 alongside SystemVerilog RTL in one kernel — so it
+    can host the platform model as well as the design. The honest shape is a fidelity ladder, and
+    the same platform model serves three of its four rungs:
+
+    | rung | what runs | speed | fidelity |
+    | --- | --- | --- | --- |
+    | 1 | VCML alone, no RTL | fastest | functional only (D35) |
+    | 2 | VCML + Verilated RTL | fast | two-state, synthesisable subset, no SVA |
+    | 3 | VCML + **real RTL** under Questa | slow | four-state, full SystemVerilog, SVA live, RTL unmodified |
+    | 4 | pure RTL under Questa | slowest | the upstream suites and litmus |
+
+  - **Rung 3 is what makes the virtual platform checkable against the design.** D35 records the
+    platform as functional-only, and nothing anywhere validates the *model* against the *hardware*.
+    Replacing one TLM peripheral at a time with its RTL in the same run, and confirming the
+    platform still behaves identically, turns a plausible model into a checked one. It also gives
+    the externally-owned platform work a verification story it did not have.
+  - **It de-risks the cross-team dependency too.** Rungs 1 to 3 share one platform model, so if the
+    Verilator bridge disappoints, the platform still has somewhere to run.
+  - **What rung 3 needs that we do not have.** A **TLM-2.0 ↔ AXI4/ACE transactor**: VCML speaks the
+    TLM generic payload and the cluster boundary is pins. Vendor AMBA transactors are normally part
+    of separately-licensed VIP, the same open question as the ACE protocol checker below; writing
+    one is possible, but handshake and ordering bugs in a transactor produce exactly the confusing
+    failures the tool was adopted to avoid. Then `sccom` and ABI matching — checked rather than
+    assumed, VCML asks for `find_package(SystemC "2.3.0")` and `cxx_std_17`, so unlike `spike-vp`
+    it is **not pinned to a fork** and should build against Questa's bundled SystemC. That is build
+    integration, not research.
   - **The largest consequence is that two of Culsans' four verification suites were previously
     unreachable**, which was not visible until the licences made it worth checking:
 
@@ -527,6 +565,22 @@ This is a single coherent cluster and nothing more.
   - **First friction to expect:** `tests/common.mk` expects `SPIKE_ROOT=/opt/riscv-isa-sim`,
     `RISCV=/opt/riscv` and a `riscv64-unknown-elf-` prefix, where the Linux toolchain here is
     `riscv64-buildroot-linux-gnu-` and the bare-metal one is listed as missing in §7.
+  - **Four concurrent licences**, which is a planning input rather than a footnote. The upstream
+    suites are roughly 35 unit, 27 performance and 19 integration tests plus litmus, so four-way
+    parallelism decides what can be enforced per merge request versus what runs nightly. Three
+    consequences:
+    - **Run a smoke subset per merge request and the full suite nightly.** A regression that cannot
+      finish between pushes stops being run either side of every change to the coherence unit,
+      which was the point of having it (D39).
+    - **Litmus is iteration-hungry by construction and will dominate.** herd7 gives the *allowed*
+      outcomes; the RTL run has to sample enough executions for the absence of a forbidden one to
+      mean anything. On RTL each execution is expensive, so the iteration count is a deliberate
+      choice bounded by seats — not a default to discover after the fact. State the number the
+      evidence rests on whenever a litmus result is quoted.
+    - **Compile and simulate may draw from the same pool.** `vlog`, `vopt` and `vsim` can each
+      check out, so a parallel `make -j` can consume all four before a single simulation starts,
+      and a full-tilt regression leaves nobody able to debug interactively. Reserve a seat rather
+      than discovering this during a bring-up.
   - **Open, and worth answering before planning around it:** which tier carries what. Core, Prime
     and One have historically differed on coverage, UVM performance and debug, and Culsans' flow
     depends on `vcover` and UCDB merging. Separately, AMBA protocol-checker VIP is usually licensed
@@ -722,7 +776,7 @@ of a stock Cheshire** — D7 requires explicitly turning it on.
 | `bender` | Resolving Cheshire and Culsans dependencies. No distro package and no cargo toolchain by default |
 | RISC-V GCC >= 12 | `riscv-tests` and bare-metal stages. GCC 11 and earlier reject the ratified `zba`/`zbb`/`zbs` names, which D7 makes a hard floor |
 | PeakRDL | SystemRDL register blocks, when D38's trigger arrives |
-| Questa 2026.3 | D42: Culsans' unit, litmus, integration and performance suites; D18's gate; D39's regression. Needs a licence server, so not public CI |
+| Questa 2026.3, 4 concurrent | D42: Culsans' unit, litmus, integration and performance suites; D18's gate; D39's regression. Needs a licence server, so not public CI |
 | `diy` / litmus7 and herd7 | D18 via D42. Culsans' `tests/litmus` builds the tests, but the generator and the oracle are separate |
 
 Device tree note: the single `riscv,isa` string is deprecated in favour of `riscv,isa-base` plus a
