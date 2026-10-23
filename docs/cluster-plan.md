@@ -98,6 +98,17 @@ This is a single coherent cluster and nothing more.
 - **D15 — Preload a single OpenSBI `fw_payload.elf`** (OpenSBI + kernel + DTB + initramfs) into the
   behavioural memory at reset. No boot ROM path, no SPI/SD model, no U-Boot, no filesystem in
   phase 1.
+  - **Two constraints the one-line form hides**, both of which bite at build time rather than at
+    boot time:
+    - **`fw_payload` takes exactly one payload.** `FW_PAYLOAD_PATH` is a single file, so "kernel +
+      initramfs" means the initramfs is linked *into* the kernel via `CONFIG_INITRAMFS_SOURCE`,
+      not appended as a second blob. The Buildroot configuration has to produce that `Image`.
+    - **The device tree comes in through `FW_FDT_PATH`, and it is then the only one the system
+      sees** — there is no `a1` pointer to fall back on, because nothing else places a DTB. Per
+      D37 that path must be `sw/cva6-multi.dtb` itself, never a copy, and the firmware is rebuilt
+      whenever the map changes. This is the one consumer `gen.py --check` cannot police.
+  - Note the offsets already agree: `FW_PAYLOAD_OFFSET` defaults to `0x20_0000`, which against the
+    `0x8000_0000` firmware base is the `0x8020_0000` kernel address the map already carries.
 - **D16 — Hart 0 boots; harts 1–3 park in `wfi` awaiting OpenSBI HSM start.** Letting the other
   three free-run into the kernel produces corruption that looks random and is painful to diagnose.
   **The boot hart is not hart 0 by default** — observed on QEMU `virt` booting on hartid 3 in one
@@ -431,6 +442,31 @@ This is a single coherent cluster and nothing more.
     the diff against known-good output caught.
   - **Stdlib only, JSON not YAML.** No pyyaml here and Python is 3.10 with no `tomllib`. A generator
     that needs a dependency installed is a generator that will not run on the machine that needs it.
+  - **One consumer the gate cannot police: a device tree embedded in firmware.** `gen.py --check`
+    asserts that the committed `.dts` and `.dtb` match the JSON. It cannot assert that the
+    *firmware* was built against that `.dtb` rather than a copy of it, and on OpenSBI's generic
+    platform an embedded FDT **overrides the pointer passed in `a1`**. So a firmware built with
+    `FW_FDT_PATH` silently replaces the generated device tree with whatever was baked in at
+    firmware build time, and the failure is the D7 class — it boots, then something disagrees
+    subtly, a long way from the cause.
+    - **Rule: any `FW_FDT_PATH` points at `sw/cva6-multi.dtb`, never at a copy**, and the firmware
+      is rebuilt whenever the map changes. A copy is a fifth hand-maintained device tree with the
+      gate looking the other way.
+    - **D15 already commits to exactly this packaging**, so the rule is a requirement of an
+      existing decision rather than a precaution against a hypothetical one. Under `fw_payload`
+      there is no pointer in `a1` to override, because nothing else places a device tree: the
+      embedded FDT *is* the mechanism, and it is the only copy the system sees.
+    - Not a problem in the **current QEMU flow**, and checked rather than assumed: neither
+      `fw_jump.bin` nor `fw_dynamic.bin` contains the `d00dfeed` magic, Buildroot sets no
+      `FW_FDT_PATH`, and the QEMU board deliberately refuses to synthesise a device tree — most
+      RISC-V machines build one in `machine_init`, which would itself have been a second source.
+      The DTB reaches OpenSBI in `a1` from the boot ROM, and the check script's first assertions
+      read our own `model` string back out of it.
+    - The `fw_payload.elf` sitting in the OpenSBI build tree today is **not** D15's image: it
+      carries no FDT, and its `.payload` is OpenSBI's 8520-byte built-in test payload rather than
+      our 27 MiB `Image`, because neither `FW_PAYLOAD_PATH` nor `FW_FDT_PATH` is set. It is a
+      build by-product Buildroot does not even copy to `images/`. D15's image has to be built
+      deliberately, and that build is where this rule applies.
   - **This is the lightweight precursor to D38's heavier flows**, not a competitor to them. It owns
     addresses and cross-consumer properties. It does not describe structure, connectivity or register
     fields, and is not trying to.
@@ -727,6 +763,10 @@ possible cause.
 3. **Two harts, SMP** — the first stage where coherence and IPIs matter at all. Litmus gate (D18)
    precedes this.
 4. **Four harts, SMP** — scale. The D1 success condition.
+
+**Packaging changes at stage 1 — see D15**, which preloads a single `fw_payload.elf`. The device
+tree moves inside the firmware image there, which is D37's one blind spot: the stage to apply that
+rule, not the stage to discover it.
 
 **Open risk:** Culsans may not support a single-core configuration. It is a coherency unit built
 for 2–4 cores and `NrHarts=1` may be untested or structurally unsupported. If so, stages 1 and 2
