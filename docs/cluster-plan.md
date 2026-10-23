@@ -28,7 +28,7 @@ This is a single coherent cluster and nothing more.
 
 ## 2. Glossary
 
-Every acronym of three or more capitals used in this document, spelled out and explained. Identifiers in code — `AWSNOOP`, `FW_FDT_PATH` — are not acronyms and are not listed. `ci/check-glossary.py` asserts this section covers the prose.
+Every acronym of three or more capitals used in this document, spelled out and explained. Identifiers in code — `AWSNOOP`, `FW_FDT_PATH` — are not acronyms and are not listed. `ci/check-document.py` asserts this section covers the prose, and that every `§N` reference resolves.
 
 ### RISC-V architecture
 
