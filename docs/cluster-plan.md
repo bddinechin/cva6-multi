@@ -31,7 +31,9 @@ This is a single coherent cluster and nothing more.
 ### Goal and target
 
 - **D1 — Done = SMP Linux to a shell on 4 harts.** Not `riscv-tests` passing, not bare-metal AMP.
-- **D2 — Verilator first, FPGA as phase 2.** Behavioural AXI memory in phase 1.
+- **D2 — Verilator first, FPGA as phase 2.** Behavioural AXI memory in phase 1. **Amended by
+  D42**: Verilator remains the vehicle for *software* bring-up, but it is no longer the only
+  simulator — Questa carries the verification suites that Verilator cannot run at all.
 - **D3 — `NrHarts` parameterised throughout, default 4.** Cheap now; expensive to retrofit through
   the interconnect, PLIC contexts, CLINT `mtimecmp` array, debug module hart selection and the
   device tree generator. Also enables a 1-hart bring-up as an easier debug target.
@@ -112,8 +114,19 @@ This is a single coherent cluster and nothing more.
   by Linux hanging is close to undiagnosable: the symptom appears thousands of instructions after
   the violating interleaving, in kernel code nobody here wrote, on four harts at once. The same bug
   found by a litmus test is a ten-line repro with an exact failing interleaving.
+  - **Amended by D42: the suite exists and we do not write it.** Culsans ships `tests/litmus/`,
+    which builds RISC-V litmus tests with the `diy`/litmus7 generator, runs them on the RTL and
+    compares outcomes against **herd7**'s expected set through `create_exp.py`. The remaining work
+    is porting it to this cluster — Cheshire platform, our map, the extra slave port — which is a
+    much smaller job than building a litmus flow, and a different one. It is Questa-only: the
+    Makefile drives `vsim` against a `vopt`-produced `_optimized` top and there is no Verilator
+    harness, so without a licence this gate was not reachable at any price in effort.
 - **D19 — Three verification layers before Linux:** `riscv-tests` for the single-hart baseline,
   Spike step-and-compare for per-hart divergence, litmus for coherence.
+  - **D42 adds a fourth below them**: Culsans' own unit suite, roughly 35 tests of which a third
+    are constrained-random. It sits below `riscv-tests` because it exercises the coherence unit
+    directly rather than through an instruction stream, and it is the layer that would catch a
+    D39 regression.
 - **D20 — Four milestones, each a working system.** See §5.
 
 ### Environment
@@ -469,6 +482,57 @@ This is a single coherent cluster and nothing more.
     drawing: interrupts terminating at the coherence unit rather than at the harts, and a remote
     store drawn as completing only when another cache held the line dirty.
 
+- **D42 — Questa 2026.3 is the verification simulator; Verilator stays the software-bring-up
+  simulator.** Two simulators, two jobs, the same split as D36's "one ISS, two jobs". Verilator
+  boots software at a speed Questa cannot approach on a four-core coherent cluster; Questa runs
+  the suites Verilator cannot run at all.
+  - **The largest consequence is that two of Culsans' four verification suites were previously
+    unreachable**, which was not visible until the licences made it worth checking:
+
+    | suite | what it is | Verilator harness |
+    | --- | --- | --- |
+    | `tests/unit/` | ~35 tests, around a third constrained-random | **none** — Questa only |
+    | `tests/litmus/` | litmus7-generated, herd7 as the oracle | **none** — Questa only |
+    | `tests/integration/` | ~19: AMO mutex, spin locks, writeback/evict/flush | `culsans_tb.cpp` |
+    | `tests/performance/` | ~27 latency tests, hit/shared/remote × busy × snoop | `culsans_tb.cpp` |
+
+  - **It de-risks D39 more than anything else available.** Widening `NoSlvPorts` to 5 and
+    attaching the shim is the change most likely to break the coherence unit subtly rather than
+    loudly, and there is now an upstream regression to run before and after. More generally it is
+    what D12 and D13 were missing: a tracked fork you cannot regression-test is a tracked fork you
+    are guessing about.
+  - **Constrained-random becomes possible at all.** Verilator has no class randomisation, no
+    constraint solver and no covergroups; the unit suite has `TB_AXI_RAND_DELAY` and
+    `ENABLE_ICACHE_RANDOM_GEN`, and `tests/common.mk` already merges UCDB coverage with `vcover`.
+    For a MOESI broadcast coherence unit this is the distinction that matters: directed tests find
+    the bugs someone thought of, random stimulus finds the interleavings. The snoop shim is
+    exactly such a block — its plausible failure is back-pressure *timing*, and
+    `tb_snoop_responder_cacheless.sv` walks the encodings deterministically.
+  - **Four-state simulation.** Verilator is two-state, so X-propagation is invisible: reset
+    bring-up and uninitialised SRAM are the bug class it hides and FPGA then exposes. Concretely
+    for the shim, the negedge drive-and-sample convention that testbench uses to avoid races can
+    be replaced by SVA and an explicit X check rather than a scheduling trick.
+  - **It gives the window sizing its first real basis.** §8 records that sizing has none. The
+    performance suite measures read and write latency across hit, shared and remote cases with and
+    without snoop contention, on the RTL. Incomplete — there is no NoC in it — but cycle data
+    rather than a guess, and it bears on D26's partition too.
+  - **What it does not change.** Nothing in D35 or D36: the virtual platforms are unaffected, and
+    `verilator --sc` remains what emits SystemC for the co-simulation bridge. It does not help the
+    8 MiB FPGA-fit risk. And it does not displace Verilator for booting Linux, which is ~10⁸
+    cycles.
+  - **The existing gates stay licence-free.** A licensed simulator needs a licence server, so it
+    cannot run in public CI. The map, diagram and strip-list gates deliberately need only Python,
+    Graphviz and a C++ compiler; Questa regressions are a separate and heavier tier, not something
+    to fold into them.
+  - **First friction to expect:** `tests/common.mk` expects `SPIKE_ROOT=/opt/riscv-isa-sim`,
+    `RISCV=/opt/riscv` and a `riscv64-unknown-elf-` prefix, where the Linux toolchain here is
+    `riscv64-buildroot-linux-gnu-` and the bare-metal one is listed as missing in §7.
+  - **Open, and worth answering before planning around it:** which tier carries what. Core, Prime
+    and One have historically differed on coverage, UVM performance and debug, and Culsans' flow
+    depends on `vcover` and UCDB merging. Separately, AMBA protocol-checker VIP is usually licensed
+    apart from the simulator — an ACE checker bound to the new slave port would be the cheapest
+    insurance available for D39, so whether it is included is worth establishing.
+
 ### Remote store programming
 
 ![D2 — coherent remote store path](diagrams/D2-remote-store-path.svg)
@@ -658,6 +722,8 @@ of a stock Cheshire** — D7 requires explicitly turning it on.
 | `bender` | Resolving Cheshire and Culsans dependencies. No distro package and no cargo toolchain by default |
 | RISC-V GCC >= 12 | `riscv-tests` and bare-metal stages. GCC 11 and earlier reject the ratified `zba`/`zbb`/`zbs` names, which D7 makes a hard floor |
 | PeakRDL | SystemRDL register blocks, when D38's trigger arrives |
+| Questa 2026.3 | D42: Culsans' unit, litmus, integration and performance suites; D18's gate; D39's regression. Needs a licence server, so not public CI |
+| `diy` / litmus7 and herd7 | D18 via D42. Culsans' `tests/litmus` builds the tests, but the generator and the oracle are separate |
 
 Device tree note: the single `riscv,isa` string is deprecated in favour of `riscv,isa-base` plus a
 `riscv,isa-extensions` array. Linux will not enable its Zbb-optimised string routines or report the
@@ -738,3 +804,6 @@ inside the cluster boundary. **Additional clusters cost no additional rules.**
   actually asserts.
 - Window region sizing, and the 8 MiB array, both need checking against a chosen FPGA part's
   on-chip memory; and the 1 MiB way granularity against `axi_llc`'s legal configurations.
+  Window sizing now has a route to a real number (D42): Culsans' performance suite measures read
+  and write latency across hit, shared and remote cases under snoop contention, on the RTL. With
+  no NoC in it, that bounds the cluster-local half of the question only.
