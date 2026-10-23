@@ -901,3 +901,122 @@ inside the cluster boundary. **Additional clusters cost no additional rules.**
   Window sizing now has a route to a real number (D42): Culsans' performance suite measures read
   and write latency across hit, shared and remote cases under snoop contention, on the RTL. With
   no NoC in it, that bounds the cluster-local half of the question only.
+
+
+---
+
+## 9. Glossary
+
+Every acronym of three or more capitals used in this document, spelled out and explained. Identifiers in code — `AWSNOOP`, `FW_FDT_PATH` — are not acronyms and are not listed. `ci/check-glossary.py` asserts this section covers the prose.
+
+### RISC-V architecture
+
+- **RISC-V** — Reduced Instruction Set Computer, fifth Berkeley generation. The open instruction-set architecture this cluster implements.
+- **ISA** — Instruction Set Architecture. The instructions and registers software may rely on; per D7 a model that advertises more than it implements kills the boot silently.
+- **CSR** — Control and Status Register. The RISC-V privileged register file, reached by the `csrr`/`csrw` family.
+- **AMO** — Atomic Memory Operation. A read-modify-write performed indivisibly, the basis of locks and of several coherence tests.
+- **MMU** — Memory Management Unit. Translates virtual to physical addresses; this design uses Sv39, three-level, 39-bit virtual addresses.
+- **TLB** — Translation Lookaside Buffer. The MMU's cache of recent translations, which must be invalidated across harts on a mapping change — the shootdown that IPIs carry.
+- **PMA** — Physical Memory Attributes. Per-region properties — cacheable, idempotent, executable — that the hardware applies to an address. Cheshire derives CVA6's from a fixed set of regions, which is why D22 keeps everything inside the external window.
+- **PMP** — Physical Memory Protection. The RISC-V machine-mode region permission mechanism; OpenSBI uses it to fence the firmware off from the kernel.
+- **ABI** — Application Binary Interface. The calling and layout conventions a compiled object assumes; here, what a SystemC library and the simulator's own build must agree on.
+- **HSM** — Hart State Management. The SBI extension by which one hart starts, stops and queries another — how harts 1 to 3 leave `wfi` in D16.
+- **MUL** — The multiply pipeline of the core; named here because the carry-less multiply in it is the likely critical path on FPGA.
+- **XOR** — Exclusive OR.
+
+### Interrupts and timers
+
+- **IRQ** — Interrupt Request.
+- **MSI** — Message-Signalled Interrupt. An interrupt delivered as a memory write rather than a wire.
+- **CLINT** — Core-Local Interruptor. The SiFive-originated timer and software-interrupt device: `mtime`, `mtimecmp` per hart, and `msip` for inter-processor interrupts.
+- **ACLINT** — Advanced Core-Local Interruptor. The RISC-V successor to the CLINT, splitting it into separately addressable MTIMER, MSWI and SSWI devices.
+- **MTIMER** — The ACLINT timer device, holding `mtime` and the per-hart `mtimecmp`.
+- **MSWI** — The ACLINT machine-mode software-interrupt device, holding the per-hart `msip`.
+- **SSWI** — The ACLINT supervisor-mode software-interrupt device.
+- **PLIC** — Platform-Level Interrupt Controller. The original RISC-V wired-interrupt controller, with one context per hart per privilege level — eight for four harts.
+- **AIA** — Advanced Interrupt Architecture. The ratified replacement for the PLIC, comprising APLIC and IMSIC. Its group-index scheme is what D23 aligns the cluster field of the address map to.
+- **APLIC** — Advanced Platform-Level Interrupt Controller. The AIA's wired-interrupt half.
+- **IMSIC** — Incoming Message-Signalled Interrupt Controller. The AIA's per-hart message-interrupt file, one per privilege level.
+- **CLIC** — Core-Local Interrupt Controller. A RISC-V low-latency interrupt controller, not used here.
+
+### Coherence and interconnect
+
+- **AMBA** — Advanced Microcontroller Bus Architecture. ARM's family of on-chip interconnect protocols.
+- **AXI** — Advanced eXtensible Interface. The AMBA protocol used throughout this design; independent address, data and response channels in each direction.
+- **AXI4** — Version 4 of AXI, the variant used here.
+- **ACE** — AXI Coherency Extensions. Adds cache coherency to AXI through three snoop channels — AC for the snoop address, CR for the response, CD for any data returned. The snoop responder shim exists because a port must answer on AC and CR even when it holds no data.
+- **CCU** — Cache Coherency Unit. The block that keeps the cores' L1 data caches coherent; here the Culsans unit, adopted unmodified.
+- **MESI** — Modified, Exclusive, Shared, Invalid. A classic set of cache-line coherency states.
+- **MOESI** — Modified, Owned, Exclusive, Shared, Invalid. The protocol this CCU implements; the Owned state lets a dirty line be shared without writing it back first.
+- **FIFO** — First In, First Out. A queue; here usually the buffering in a flow-control path.
+- **FSM** — Finite State Machine.
+
+### Memory and caches
+
+- **RAM** — Random-Access Memory.
+- **ROM** — Read-Only Memory.
+- **SRAM** — Static Random-Access Memory. On-chip memory built from flip-flop cells.
+- **DRAM** — Dynamic Random-Access Memory. Off-chip main memory.
+- **LLC** — Last-Level Cache. Here `axi_llc`, the shared L2, which also supports way-partitioning into scratchpad.
+- **SPM** — Scratchpad Memory. Directly addressed on-chip memory with no cache behaviour.
+- **CIE** — The attribute region of Cheshire's external window that CVA6 treats as cacheable, idempotent and executable; the split point between it and the non-cacheable remainder is what D24 places the two cluster-local aliases either side of. The exact semantics of its length parameter are an open item.
+- **EXTROM** — Cheshire's external ROM region.
+- **BOOTROM** — Cheshire's boot ROM region, where the harts reset.
+- **MMIO** — Memory-Mapped Input/Output. Device registers reached as ordinary addresses.
+- **DMA** — Direct Memory Access. A engine that moves data without a core issuing each access.
+- **PASW** — Physical Address Slave Window. A programmable address window, as opposed to a fixed decode rule.
+
+### Devices and the platform
+
+- **CPU** — Central Processing Unit.
+- **CVA6** — CORE-V A6. The OpenHW Foundation's 64-bit application-class RISC-V core, six-stage pipeline, formerly Ariane. Four of them make this cluster.
+- **UART** — Universal Asynchronous Receiver/Transmitter. The serial console; this one is 16550-compatible and word-spaced.
+- **SPI** — Serial Peripheral Interface.
+- **GPIO** — General-Purpose Input/Output.
+- **VGA** — Video Graphics Array. A display interface, dropped from phase 1.
+- **JTAG** — Joint Test Action Group. The IEEE 1149.1 scan interface, used here as the debug transport.
+- **DTM** — Debug Transport Module. The JTAG-facing half of the RISC-V debug specification.
+- **FPGA** — Field-Programmable Gate Array.
+- **ECP5** — A Lattice FPGA family.
+- **PULP** — Parallel Ultra-Low-Power. The ETH Zurich and University of Bologna open-hardware project, source of Cheshire, `axi_llc`, the CCU and much else here.
+- **ESP** — Embedded Scalable Platforms. Columbia University's open-source SoC platform, cited as coherence precedent.
+
+### Boot and the device tree
+
+- **DTB** — Device Tree Blob. The compiled binary form, produced by `dtc`.
+- **FDT** — Flattened Device Tree. The same blob seen from firmware; an FDT embedded in firmware overrides the pointer passed in a register, which is D37's one blind spot.
+- **SMP** — Symmetric Multi-Processing. One operating-system image across all harts.
+- **AMP** — Asymmetric Multi-Processing. Separate images per core or cluster.
+
+### Verification and simulation
+
+- **RTL** — Register Transfer Level. Synthesisable hardware description — the design itself, as opposed to a model of it.
+- **SVA** — SystemVerilog Assertions. Properties checked continuously during simulation; unavailable under a two-state simulator.
+- **UVM** — Universal Verification Methodology. The standard class library for constrained-random, coverage-driven testbenches.
+- **VIP** — Verification Intellectual Property. Bought or supplied protocol agents, checkers and coverage models.
+- **UCDB** — Unified Coverage Database. The format Questa stores and merges coverage in.
+- **ISS** — Instruction Set Simulator. A functional model of a core, fast but with no timing.
+- **TCG** — Tiny Code Generator. QEMU's dynamic binary translator, the reason it boots Linux in seconds.
+- **QEMU** — Quick Emulator. The machine emulator carrying this project's custom board.
+
+### Modelling and virtual platforms
+
+- **TLM** — Transaction-Level Modelling. The SystemC abstraction where a whole bus transaction is one function call rather than pin activity; TLM-2.0 is the interoperable form.
+- **VCML** — Virtual Components Modeling Library. MachineWare's Apache-2.0 SystemC/TLM library of peripherals and modelling primitives.
+- **AVP64** — An open ARMv8 virtual platform built on QEMU and VCML, cited as precedent for wrapping a translating core.
+
+### Tooling, formats and organisations
+
+- **GCC** — GNU Compiler Collection.
+- **JVM** — Java Virtual Machine.
+- **JSON** — JavaScript Object Notation. The format of the address-map source.
+- **XML** — Extensible Markup Language.
+- **YAML** — YAML Ain't Markup Language.
+- **SVG** — Scalable Vector Graphics. The committed rendering of each diagram.
+- **PDF** — Portable Document Format.
+- **SHA** — Secure Hash Algorithm. Here, a Git commit identifier.
+- **IP-XACT** — The IEEE 1685 XML format describing IP blocks and their assembly.
+- **IEEE** — Institute of Electrical and Electronics Engineers. Standards body: SystemC is IEEE 1666, JTAG is 1149.1, IP-XACT is 1685.
+- **ARM** — The company whose AMBA protocols this design uses.
+- **MIT** — The MIT licence.
+
