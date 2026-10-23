@@ -46,6 +46,6 @@ platform, the QEMU memmap and the VCML map.
 
 A diagram that disagrees with the decision record is worse than no diagram, because it looks
 authoritative. Both hand-written sources carry a comment naming the decisions they depict, so a
-change to D6, D26, D39 or D40 should send you here. Two errors were already caught this way while
-drawing them: interrupts drawn terminating at the coherence unit rather than at the harts, and a
-remote store drawn as completing only when some other cache held the line dirty.
+change to D6, D26, D39 or D40 should send you here. Check the drawn behaviour against the decision
+before trusting it: interrupts terminate at the harts rather than at the coherence unit, and a
+coherent remote store completes whether or not another cache held the line dirty.
