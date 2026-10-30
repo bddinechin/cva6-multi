@@ -303,8 +303,15 @@ Every acronym of three or more capitals used in this document, spelled out and e
       local alias is what lets one kernel image and one device tree run on any cluster.
   - **The aperture is re-cut**, keeping every region a naturally-aligned power-of-two block per
     D27. See §9.
-  - **A non-cacheable window survives**, smaller, for DMA landing zones and mailboxes — traffic
-    that should not be cached. It is no longer the primary path.
+  - **The non-cacheable window is dropped.** It existed because, before this decision, it was the
+    only way into a cluster. It never had a defined backing store: the cluster has exactly one pool
+    of on-chip SRAM, the `axi_llc` array of D26, and nothing said what part of it the window used.
+    Backing it with the same bytes the cores cache would reintroduce the aliasing hazard above in a
+    worse form, since the two views would differ in cacheability by design; giving it a disjoint
+    partition would divide scarce SRAM to buy an optimisation nobody has measured. **One
+    remote-writable region, one set of attributes.** If snoop traffic for bulk transfers later
+    proves a real cost, a non-coherent partition can be added then — the aperture keeps 15 MiB
+    reserved — and HPDcache ships the cache maintenance operations it would need.
   - **What it costs.** The unreachability-by-shape property, which was real safety for free. Snoop
     traffic: every inbound remote write snoops the destination's L1s, which is affordable at four
     cores and is the argument for the directory-based path at sixteen. And verification nobody has
@@ -1076,8 +1083,8 @@ device-tree binding requires one IMSIC node per privilege level, making it de fa
 | --- | --- | --- |
 | `+0x000_0000` | 1 MiB | Externally-visible per-cluster MMIO — global alias of the IMSIC/APLIC pages |
 | `+0x010_0000` | 15 MiB | Reserved |
-| `+0x100_0000` | 8 MiB | **Scratchpad aperture — cacheable and shareable. The RSP target (D44)** |
-| `+0x180_0000` | 8 MiB | Window region, non-cacheable. DMA landing zones and mailboxes |
+| `+0x100_0000` | 8 MiB | **Scratchpad aperture — cacheable and shareable. The RSP target, and the only remote-writable region (D44)** |
+| `+0x180_0000` | 8 MiB | Reserved — where a non-coherent bulk partition would go if one is ever justified |
 
 Every region is a naturally-aligned power-of-two block, per D27.
 
@@ -1095,9 +1102,10 @@ silently. One subtract at the boundary; see D44.
 **Self-window turnaround** falls out of D23: a cluster reaching its own window uses the global address
 for its own ID, and the boundary compares `addr[27:25]` against its own cluster ID and services the
 access locally instead of emitting it. Same mechanism, no special case. **Present from phase 1 per
-D40**, serviced at the boundary rather than looped through the inbound write port. The window is
-non-cacheable **and shareable** — the second attribute is what makes a core's store to it a
-`WriteUnique` the CCU invalidates on, rather than a `WriteNoSnoop` that quietly does nothing.
+D40**, serviced at the boundary rather than looped through the inbound write port, and
+**translating to the local alias** for the scratchpad aperture per D44. The aperture is
+**shareable**, which is what puts it in the coherence domain; outside one, `miss_handler.sv` picks
+`WRITE_NO_SNOOP`, which bypasses the CCU and invalidates nothing.
 
 ### Decode rules required
 
