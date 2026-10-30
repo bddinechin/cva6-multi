@@ -352,15 +352,10 @@ Every acronym of three or more capitals used in this document, spelled out and e
       not reorder in a way that breaks RVWMO between a producer and a destination. That constraint
       belongs in the NoC's requirements from the start, because discovering it afterwards is the
       expensive order.
-  - **Open: nothing says who may write whose scratchpad.** Before D44 unreachability-by-shape meant
-    no cluster could touch another's — safety as a property of the map, now spent with nothing in
-    its place. PMP does not help: it gates a hart's *own* accesses, not inbound ones. For a single
-    cooperative application this matches RSP's original setting and is fine; for anything
-    mixed-criticality it is an open door. Two mechanisms are already in reach — a per-cluster
-    inbound permission register, for which the new CCU's CSR block (`ccu_csr.sv`, D43) is a
-    precedent, or an IOMMU on the inbound path, which VCML models and the reconvergence target
-    commits to anyway. Deferred rather than decided, because the answer depends on whether this is
-    ever multi-tenant.
+  - **Who may write whose scratchpad is settled by D46: a stray remote store must be prevented.**
+    Before D44, unreachability-by-shape meant no cluster could touch another's — safety as a
+    property of the map, spent by D44 with nothing in its place. PMP does not fill it: PMP gates a
+    hart's *own* accesses, not inbound ones.
   - **Open: allocation.** Who owns which part of a destination's 8 MiB is a software contract and
     needs stating before two teams write to the same offsets.
   - **Consequence for D18: the litmus gate moves.** The ordering decision above makes the memory
@@ -371,6 +366,43 @@ Every acronym of three or more capitals used in this document, spelled out and e
     Affordable at four cores and the reason eight needs care; the snoop filter on the D43 line
     improves it materially, which is the same convergence toward a
     directory noted above.
+
+- **D46 — A stray remote store from one cluster must be *prevented*, not merely debugged.** The
+  inbound path is checked, and a store from a cluster not permitted to write a region is rejected
+  before it reaches the coherence domain.
+  - **This is not a security-only question, and "we run one Linux" is not a reason to skip it.**
+    The inbound path is architecturally **DMA**: an inbound write carries a physical address and
+    passes through no core's MMU and no PMP, because both of those gate a hart's own accesses. So
+    even with a single SMP Linux spanning every cluster — emphatically not several tenants — a
+    buggy driver on one cluster can scribble on another's physical memory, exactly as a
+    misprogrammed DMA engine can. Mixed-criticality needs the check for a second reason, with no
+    adversary anywhere: freedom from interference has to be *argued*, not assumed.
+  - **Where: at the cluster boundary, in the same block that performs D44's translation**, and
+    **upstream of the CCU**. The last part is the requirement that matters — a rejected write must
+    never enter the coherence domain, or a denied store still snoops and still invalidates, which
+    is an interference channel in its own right.
+  - **Mechanism still open**, and the choice is genuinely balanced:
+    - **A per-cluster inbound permission register.** Cheap, and the new CCU's CSR block
+      (`ccu_csr.sv`, D43) is a precedent for where it would live. Granularity is coarse — source
+      cluster against address range — which is likely enough for RSP, where the unit of sharing is
+      a buffer rather than a page.
+    - **An IOMMU on the inbound path.** Standard, far heavier, page-granular, and already
+      committed to by the reconvergence target; VCML models one (`riscv/iommu.h`, D36).
+  - **Two requirements this creates, both easy to miss:**
+    1. **The source cluster identity must be unforgeable.** A check is worthless if a cluster can
+      claim to be another, so the fabric must attach the source id where the transaction enters and
+      must not let the payload set it. This joins RVWMO (D45) as a requirement the NoC has to carry
+      from the start rather than acquire later.
+    2. **Violation reporting belongs at the destination, not only at the source.** RSP is
+      fire-and-forget: the producer may have retired the store long before any response arrives, so
+      an error on the ACE write response is necessary and not sufficient. The destination must log
+      the rejected access and be able to raise an interrupt — otherwise a prevented write is also
+      an invisible one, and a misconfigured permission looks exactly like a software bug.
+  - **Honest about what is lost.** §9 originally justified the scratchpad's unreachability as *"a
+    property of the map's shape rather than a permission check that could be misconfigured"*. This
+    is precisely the permission check that sentence contrasted against. A check is strictly weaker
+    than a map that cannot express the access at all, and it is weaker in the specific way that
+    sentence named. The capability D44 wanted is not available without accepting that.
 
 ### Boot and debug
 
