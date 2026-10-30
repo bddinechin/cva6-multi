@@ -381,13 +381,8 @@ Every acronym of three or more capitals used in this document, spelled out and e
     **upstream of the CCU**. The last part is the requirement that matters — a rejected write must
     never enter the coherence domain, or a denied store still snoops and still invalidates, which
     is an interference channel in its own right.
-  - **Mechanism still open**, and the choice is genuinely balanced:
-    - **A per-cluster inbound permission register.** Cheap, and the new CCU's CSR block
-      (`ccu_csr.sv`, D43) is a precedent for where it would live. Granularity is coarse — source
-      cluster against address range — which is likely enough for RSP, where the unit of sharing is
-      a buffer rather than a page.
-    - **An IOMMU on the inbound path.** Standard, far heavier, page-granular, and already
-      committed to by the reconvergence target; VCML models one (`riscv/iommu.h`, D36).
+  - **Mechanism chosen in D47: a per-cluster inbound permission filter.** An IOMMU on the inbound
+    path remains the escalation, and D47 records what would trigger it.
   - **Two requirements this creates, both easy to miss:**
     1. **The source cluster identity must be unforgeable.** A check is worthless if a cluster can
       claim to be another, so the fabric must attach the source id where the transaction enters and
@@ -403,6 +398,57 @@ Every acronym of three or more capitals used in this document, spelled out and e
     is precisely the permission check that sentence contrasted against. A check is strictly weaker
     than a map that cannot express the access at all, and it is weaker in the specific way that
     sentence named. The capability D44 wanted is not available without accepting that.
+
+- **D47 — The inbound check is a per-cluster permission filter, shaped like a PASW decoder.** Base
+  plus mask plus a source bitmap, a few hundred gates, no added latency. An IOMMU stays the
+  escalation path, not the starting point.
+  - **The logic, in full:**
+
+    | field | width | |
+    | --- | --- | --- |
+    | `base` | ~20 bits | naturally-aligned power-of-two region |
+    | `size` | 5 bits | encoded as a mask |
+    | `src_allow` | 8 bits | which source clusters may write this region |
+    | `en`, `W` | 2 bits | |
+
+    ```
+    hit[i]   = en[i] && ((addr ^ base[i]) & ~size_mask[i]) == 0
+    allow[i] = hit[i] && src_allow[i][src_id]
+    allow    = |allow[]            // default deny
+    ```
+
+    Four to eight entries is a masked comparator and an eight-bit mux each, plus an OR tree.
+    Against the CCU's 35 kGE (D43) the cost is noise.
+  - **No latency on the store path**, which is the reason to prefer it over an IOMMU. The compare
+    runs *in parallel* with D44's subtract: both are combinational, they resolve in the same cycle,
+    and the result gates forwarding into the CCU. An IOMMU puts a table walk, and on a miss actual
+    memory accesses, on the critical path of a store whose entire premise is that it is cheap.
+  - **D27's constraint already pays for the shape.** It requires every region to be a
+    naturally-aligned power-of-two block, for an unrelated reason — so a region can become a
+    programmable window later without moving. That is exactly what a base-plus-mask comparator
+    needs, so the filter inherits a property the map already guarantees.
+  - **Four rules, each cheap now and expensive to retrofit:**
+    1. **Default deny.** No entry matches, the write is rejected. A forgotten configuration then
+       fails closed and loudly rather than working until the day it does not.
+    2. **The registers live in the cluster-local alias and never appear in the global aperture.**
+       Otherwise a sibling can grant itself access and the mechanism defeats itself. The map shape
+       enforces it: `clusterregs` is local-only, and the aperture's MMIO region is not a legal home
+       for them. Reserved at `0x4005_0000`.
+    3. **Violation capture**: faulting address, source id, a sticky valid bit, and an interrupt to
+       the local interrupt controller. About a hundred flops, and it is what makes D46's second
+       requirement real — a prevented write nobody sees is a software bug that costs a week.
+    4. **Source id is three bits** for D23's eight clusters, four if D25's sixteen-cluster ceiling
+       ever matters. The bitmap grows with it and stays trivial.
+  - **It polices the doorbell too.** The same filter covers the aperture's MMIO sub-region, so an
+    entry scoped to the IMSIC pages decides which clusters may raise an interrupt here — at region
+    granularity, which is sufficient for a non-virtualised system. What it cannot do is the IMSIC
+    guest-file translation an IOMMU performs.
+  - **What would trigger the escalation to an IOMMU**, recorded so the decision is reversible on
+    evidence rather than taste: a hypervisor spanning clusters, per-process rather than per-cluster
+    isolation, buffer relocation without coordinating with the producer, or wanting the producer
+    not to know the destination's physical layout at all. That last one is a programming-model
+    change, not a mechanism swap — the aperture would become a per-source translated space rather
+    than a window onto the destination's memory (D45's addressing note).
 
 ### Boot and debug
 
