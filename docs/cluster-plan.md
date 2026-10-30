@@ -239,19 +239,18 @@ Every acronym of three or more capitals used in this document, spelled out and e
     `ccu_snoop_pipeline.sv`, **`ccu_snoop_filter.sv`**, `ccu_read_engine.sv`, `ccu_write_engine.sv`,
     `ccu_scoreboard.sv`, `ccu_exclusive_monitor.sv` and a generated `ccu_csr.sv`. **`ccu_fsm.sv` and
     `ace_trs_dec.sv` are gone**, and the old testbenches sit under `deprecated/`.
-  - **What this supersedes.** D9's premise, D30's module choice, D39's whole mechanism argument and
-    the component list all describe the deprecated design. They are marked rather than rewritten:
-    re-deriving them needs the new RTL read, which is work and not a correction.
-  - **What must be re-established when the RTL lands**, in order:
+  - **Decisions that still describe the deprecated design, and must be re-derived against this
+    line before they can be relied on:** D30's module choice, D39's mechanism argument, and the
+    component list in §4. Re-deriving them needs the RTL read; it is work, not an edit.
+  - **What to re-establish when the RTL lands**, in order:
     1. **Does `WriteUnique` still invalidate every sharer?** D39's remote-store-invalidate depends
        on an unconditional broadcast. A snoop filter exists precisely so that broadcast does not
        happen, so this is the first thing to check and the one most likely to have changed.
-    2. **Does the snoop responder shim still apply?** It was written against `ace_ccu_top_intf`'s
-       `SNOOP_BUS.Slave snoop_ports[]` and against `ccu_fsm` waiting on `ac_ready`/`cr_valid`
-       across all ports. A non-caching ACE port still needs an AC/CR responder, but that specific
-       deadlock argument is gone.
-    3. **Where the inbound write agent attaches**, now that port arrays and ID arithmetic have
-       changed shape.
+    2. **Does the snoop responder shim apply here?** A non-caching ACE port still needs an AC/CR
+       responder, but the shim is built against `ace_ccu_top_intf`'s
+       `SNOOP_BUS.Slave snoop_ports[]` and against an FSM this line does not have.
+    3. **Where the inbound write agent attaches**, given this line's port arrays and ID
+       arithmetic.
   - **A snoop filter is a move toward a directory, not away from it.** A filter invalidates only
     the caches that hold the line, which is what a directory does. It makes the remote-store path
     cheaper and narrows the gap §9 describes.
@@ -265,10 +264,9 @@ Every acronym of three or more capitals used in this document, spelled out and e
     frequency degradation at **850 MHz** in GlobalFoundries 12nm. Functional validation on a Xilinx
     **VCU128**, which is a data point for the FPGA board question since that part carries URAM.
     The software stack covers SMP Linux and **RTEMS**.
-  - **The core-count picture changes in both directions.** The design target is **2 to 8 cores**;
-    what has been evaluated is **dual-core**; 4 to 8 cores is listed as future work. So "four is the
-    top of the validated envelope" was wrong twice over — validated is two, and the envelope is
-    eight. Four harts remains within the intended range and beyond what anyone has demonstrated.
+  - **Core count: the design targets 2 to 8, and 2 is what has been evaluated.** Four to eight is
+    listed as future work. So four harts sits inside the intended range and beyond what anyone has
+    demonstrated — a distinction worth holding, since the cluster is specified at four.
 
 - **D44 — Remote Store Programming is the primary inter-cluster programming model.** A cluster
   writes directly into a sibling's **scratchpad**, that scratchpad is **cacheable and coherently
@@ -393,11 +391,10 @@ Every acronym of three or more capitals used in this document, spelled out and e
       an error on the ACE write response is necessary and not sufficient. The destination must log
       the rejected access and be able to raise an interrupt — otherwise a prevented write is also
       an invisible one, and a misconfigured permission looks exactly like a software bug.
-  - **Honest about what is lost.** §9 originally justified the scratchpad's unreachability as *"a
-    property of the map's shape rather than a permission check that could be misconfigured"*. This
-    is precisely the permission check that sentence contrasted against. A check is strictly weaker
-    than a map that cannot express the access at all, and it is weaker in the specific way that
-    sentence named. The capability D44 wanted is not available without accepting that.
+  - **What it costs, stated plainly.** A permission check is strictly weaker than an address map
+    that cannot express the access at all: a check can be misconfigured, and a shape cannot. D44's
+    capability is not available without accepting that, and §9 says the same thing from the map's
+    side.
 
 - **D47 — The inbound check is a per-cluster permission filter, shaped like a PASW decoder.** Base
   plus mask plus a source bitmap, a few hundred gates, no added latency. An IOMMU stays the
@@ -1218,9 +1215,10 @@ device-tree binding requires one IMSIC node per privilege level, making it de fa
 
 Every region is a naturally-aligned power-of-two block, per D27.
 
-**The scratchpad is reachable from other clusters, and that is the point (D44).** An earlier shape
-gave it no global aperture at all, which was real safety for free; RSP as the primary programming
-model requires a sibling to be able to write into it, so the property is spent deliberately.
+**The scratchpad is reachable from other clusters, and that is the point (D44).** RSP as the
+primary programming model requires a sibling to be able to write into it. The price is that
+unreachability-by-shape — safety for free, and not misconfigurable — is not available here; D46 and
+D47 put a permission check in its place, which is weaker.
 
 **The aperture address is not the address the caches hold.** Cores reach the scratchpad through the
 local alias at `0x2000_0000`; siblings reach it at `+0x100_0000` inside this aperture. The cluster
