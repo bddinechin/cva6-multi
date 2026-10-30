@@ -69,6 +69,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
 - **CCU** — Cache Coherency Unit. The block that keeps the cores' L1 data caches coherent; here the Culsans unit, adopted unmodified.
 - **MESI** — Modified, Exclusive, Shared, Invalid. A classic set of cache-line coherency states.
 - **MOESI** — Modified, Owned, Exclusive, Shared, Invalid. The protocol this CCU implements; the Owned state lets a dirty line be shared without writing it back first.
+- **RSP** — Remote Store Programming. A model in which a core writes directly into another cluster's memory and the destination's caches are invalidated, rather than the destination polling or taking an interrupt. The primary inter-cluster programming model per D44.
 - **FIFO** — First In, First Out. A queue; here usually the buffering in a flow-control path.
 - **FSM** — Finite State Machine.
 
@@ -77,6 +78,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
 - **RAM** — Random-Access Memory.
 - **ROM** — Read-Only Memory.
 - **SRAM** — Static Random-Access Memory. On-chip memory built from flip-flop cells.
+- **URAM** — UltraRAM. A larger on-chip memory primitive in recent Xilinx FPGAs, needed because the 8 MiB array exceeds the block RAM of many parts.
 - **DRAM** — Dynamic Random-Access Memory. Off-chip main memory.
 - **LLC** — Last-Level Cache. Here `axi_llc`, the shared L2, which also supports way-partitioning into scratchpad.
 - **SPM** — Scratchpad Memory. Directly addressed on-chip memory with no cache behaviour.
@@ -99,6 +101,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
 - **DTM** — Debug Transport Module. The JTAG-facing half of the RISC-V debug specification.
 - **FPGA** — Field-Programmable Gate Array.
 - **ECP5** — A Lattice FPGA family.
+- **VCU128** — A Xilinx Virtex UltraScale+ HBM evaluation board, the part the new Culsans cluster was functionally validated on (D43). It carries URAM, which the 8 MiB array needs.
 - **PULP** — Parallel Ultra-Low-Power. The ETH Zurich and University of Bologna open-hardware project, source of Cheshire, `axi_llc`, the CCU and much else here.
 - **ESP** — Embedded Scalable Platforms. Columbia University's open-source SoC platform, cited as coherence precedent.
 
@@ -108,6 +111,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
 - **FDT** — Flattened Device Tree. The same blob seen from firmware; an FDT embedded in firmware overrides the pointer passed in a register, which is D37's one blind spot.
 - **SMP** — Symmetric Multi-Processing. One operating-system image across all harts.
 - **AMP** — Asymmetric Multi-Processing. Separate images per core or cluster.
+- **RTEMS** — Real-Time Executive for Multiprocessor Systems. A real-time POSIX-compliant operating system; the new Culsans software stack supports it alongside SMP Linux (D43).
 
 ### Verification and simulation
 
@@ -140,6 +144,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
 - **IEEE** — Institute of Electrical and Electronics Engineers. Standards body: SystemC is IEEE 1666, JTAG is 1149.1, IP-XACT is 1685.
 - **ARM** — The company whose AMBA protocols this design uses.
 - **MIT** — The MIT licence.
+- **ETH** — Eidgenössische Technische Hochschule, Zürich. Co-author of the CVA6, Cheshire and Culsans work with the University of Bologna.
 
 ---
 
@@ -209,6 +214,104 @@ Every acronym of three or more capitals used in this document, spelled out and e
 - **D13 — The Culsans fork this project tracks is rebased onto a current CVA6.** This is
   load-bearing: it restores `misa.B` reporting (so Spike step-and-compare works), brings the
   upstream bitmanip decoder fixes, and makes `config_pkg.sv` and `ZKN` available.
+
+- **D43 — The Culsans line has moved on, and we follow it.** The design the earlier dependency
+  decisions were derived from is upstream's 2024 snapshot. A newer cluster exists, presented at
+  RISC-V Summit Europe 2026 by Bologna, STMicroelectronics, ETH Zürich, Aalto and Inria. Access to
+  the RTL has been requested from its first author and is not yet held; this decision assumes it
+  arrives and plans on that basis.
+  - **What the new cluster is.** Three parts, all different from what §4 lists:
+    - **CVA6S+** — RV64GC, six-stage, **dual-issue superscalar**, with a tournament branch
+      predictor chosen by design-space exploration (−10 to −36% predictor area at equal accuracy).
+    - **HPDcache extended to ACE** — a snoop handler, MOESI cacheline state tracking, a control
+      pipeline reworked for snoop transactions, coherent ATOPs and LR/SC, and an AXI-to-ACE memory
+      adapter giving direct cache-to-cache transfer of dirty data.
+    - **A rewritten CCU** with a frontend/backend split: a pipelined point of serialisation with
+      LR/SC tracking at the front, pipelined AC/CR/CD snoop handling and writebacks at the back.
+  - **We track `ace/devel`, the 2026 line.** Not the 2024 master the current pin assumes. That
+    decides what D12 and D13 pin and makes the CVA6 base CVA6S+ rather than CVA6.
+  - **The evidence is in the branches, not the default ones.** `pulp-platform/culsans` master was
+    last pushed 2024-05-04 and `pulp-platform/ace` master last committed 2024-03-24, which is where
+    the "quiet upstream" reading came from. `ace/devel` was committed **2026-10-25**, and
+    `ace/multicore/*` through 2026. On `devel` the CCU is `ccu_top.sv`, `ccu_frontend.sv`,
+    `ccu_snoop_pipeline.sv`, **`ccu_snoop_filter.sv`**, `ccu_read_engine.sv`, `ccu_write_engine.sv`,
+    `ccu_scoreboard.sv`, `ccu_exclusive_monitor.sv` and a generated `ccu_csr.sv`. **`ccu_fsm.sv` and
+    `ace_trs_dec.sv` are gone**, and the old testbenches sit under `deprecated/`.
+  - **What this supersedes.** D9's premise, D30's module choice, D39's whole mechanism argument and
+    the component list all describe the deprecated design. They are marked rather than rewritten:
+    re-deriving them needs the new RTL read, which is work and not a correction.
+  - **What must be re-established when the RTL lands**, in order:
+    1. **Does `WriteUnique` still invalidate every sharer?** D39's remote-store-invalidate depends
+       on an unconditional broadcast. A snoop filter exists precisely so that broadcast does not
+       happen, so this is the first thing to check and the one most likely to have changed.
+    2. **Does the snoop responder shim still apply?** It was written against `ace_ccu_top_intf`'s
+       `SNOOP_BUS.Slave snoop_ports[]` and against `ccu_fsm` waiting on `ac_ready`/`cr_valid`
+       across all ports. A non-caching ACE port still needs an AC/CR responder, but that specific
+       deadlock argument is gone.
+    3. **Where the inbound write agent attaches**, now that port arrays and ID arithmetic have
+       changed shape.
+  - **A snoop filter is a move toward a directory, not away from it.** A filter invalidates only
+    the caches that hold the line, which is what a directory does. It makes the remote-store path
+    cheaper and narrows the gap §9 describes.
+  - **Ask for the testbenches, not only the Verilog.** `ace/devel` carries no tests outside
+    `deprecated/`. D18's litmus gate and the case for the Questa licences in D42 both rest on the
+    four suites in the 2024 `culsans` repository. RTL without equivalents for the new line leaves
+    both stranded, and the suites are the harder half to reproduce.
+  - **Published results, as a baseline to measure against.** Dual-core on Cheshire, Splash-3 on SMP
+    Linux: **1.80× geomean** over one core, and **1.25×** from CVA6S+ with HPDcache over CVA6 with
+    the legacy write-back cache. Under 2% per-core area overhead, **35 kGE** for the CCU, no
+    frequency degradation at **850 MHz** in GlobalFoundries 12nm. Functional validation on a Xilinx
+    **VCU128**, which is a data point for the FPGA board question since that part carries URAM.
+    The software stack covers SMP Linux and **RTEMS**.
+  - **The core-count picture changes in both directions.** The design target is **2 to 8 cores**;
+    what has been evaluated is **dual-core**; 4 to 8 cores is listed as future work. So "four is the
+    top of the validated envelope" was wrong twice over — validated is two, and the envelope is
+    eight. Four harts remains within the intended range and beyond what anyone has demonstrated.
+
+- **D44 — Remote Store Programming is the primary inter-cluster programming model.** A cluster
+  writes directly into a sibling's **scratchpad**, that scratchpad is **cacheable and coherently
+  held in the destination cores' L1s**, and an inbound write invalidates the stale copies so the
+  next local load refills. Inter-cluster communication is this, not shared cacheable global memory
+  and not non-cacheable mailboxes.
+  - **This reverses two things the map currently banks.** §9 records that the private scratchpad
+    has no global aperture at all — *"no address any other cluster or external master can emit that
+    reaches it"* — and D40 makes the inter-cluster target non-cacheable. Both go.
+  - **The non-cacheable choice came from a constraint this project does not carry.** Extending the
+    coherence domain across a cluster boundary lets a sibling's writes reach into your L1 data
+    caches, which is an interference channel and a real cost where freedom from interference has to
+    be argued. There is no such argument to protect here, so the constraint is available to spend.
+  - **What it buys.** The consumer reads at L1 speed after one refill from local memory rather than
+    at non-cacheable latency on every access. That is the whole point of the trade: the producer
+    pays the store, the consumer pays one miss.
+  - **The hard part is physical-address aliasing, and it must be solved for this to be correct.**
+    A core reaches the scratchpad through the local alias at `0x2000_0000`, and its L1 tags that
+    address. A sibling reaches the same memory through the aperture at
+    `0x5000_0000 + (N << 25) + off`. Coherence is defined over physical addresses, so without
+    intervention the inbound write broadcasts an invalidate for the *aperture* address, the L1
+    holds the *local* address, the tags do not match, nothing is invalidated, and the core reads
+    stale data with no error anywhere.
+    - **This does not bite today only because the region is non-cacheable.** Nothing is cached
+      under either name, so there are no stale copies to miss. Making it cacheable turns a dormant
+      aliasing question into a silent correctness bug.
+    - **Fix: translate at the cluster boundary.** The inbound path rewrites the aperture address to
+      the local alias before the CCU sees it — one subtract — so the invalidate carries the address
+      the L1 actually holds. D40 already has the boundary comparing `addr[27:25]` and servicing a
+      match locally; this extends that from routing to translating, and the same rule covers
+      self-turnaround.
+    - **Why not the obvious alternative.** Having cores use the aperture address for their own
+      scratchpad would also give one address, and would destroy D24's position-independence: the
+      local alias is what lets one kernel image and one device tree run on any cluster.
+  - **The aperture is re-cut**, keeping every region a naturally-aligned power-of-two block per
+    D27. See §9.
+  - **A non-cacheable window survives**, smaller, for DMA landing zones and mailboxes — traffic
+    that should not be cached. It is no longer the primary path.
+  - **What it costs.** The unreachability-by-shape property, which was real safety for free. Snoop
+    traffic: every inbound remote write snoops the destination's L1s, which is affordable at four
+    cores and is the argument for the directory-based path at sixteen. And verification nobody has
+    — Culsans' litmus and unit suites are single-cluster, so D18's gate needs extending rather than
+    porting.
+  - **Depends on D43.** The mechanism has to be re-established against the new CCU before this can
+    be built. A snoop filter makes it cheaper, not harder.
 
 ### Boot and debug
 
@@ -972,12 +1075,22 @@ device-tree binding requires one IMSIC node per privilege level, making it de fa
 | Offset | Size | Region |
 | --- | --- | --- |
 | `+0x000_0000` | 1 MiB | Externally-visible per-cluster MMIO — global alias of the IMSIC/APLIC pages |
-| `+0x010_0000` | 24 MiB | Window region, non-cacheable |
-| `+0x190_0000` | 7 MiB | Reserved — mailbox, external debug |
+| `+0x010_0000` | 15 MiB | Reserved |
+| `+0x100_0000` | 8 MiB | **Scratchpad aperture — cacheable and shareable. The RSP target (D44)** |
+| `+0x180_0000` | 8 MiB | Window region, non-cacheable. DMA landing zones and mailboxes |
 
-**The scratchpad has no global aperture.** There is no address another cluster or external master can
-emit that reaches it. That unreachability is a property of the map's shape rather than a permission
-check that could be misconfigured.
+Every region is a naturally-aligned power-of-two block, per D27.
+
+**The scratchpad is reachable from other clusters, and that is the point (D44).** An earlier shape
+gave it no global aperture at all, which was real safety for free; RSP as the primary programming
+model requires a sibling to be able to write into it, so the property is spent deliberately.
+
+**The aperture address is not the address the caches hold.** Cores reach the scratchpad through the
+local alias at `0x2000_0000`; siblings reach it at `+0x100_0000` inside this aperture. The cluster
+boundary **translates the aperture address to the local alias** before the CCU sees the transaction,
+so an inbound write invalidates lines the L1s actually hold. Without that translation the invalidate
+carries an address no cache has tagged, nothing is invalidated, and the destination reads stale data
+silently. One subtract at the boundary; see D44.
 
 **Self-window turnaround** falls out of D23: a cluster reaching its own window uses the global address
 for its own ID, and the boundary compares `addr[27:25]` against its own cluster ID and services the
