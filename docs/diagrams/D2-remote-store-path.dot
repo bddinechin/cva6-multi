@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // D2 — what a coherent remote store does inside the cluster. Established from the Culsans RTL
-// and recorded in D39; the self-turnaround entry point is D40. Rendered by ./build-diagrams.sh.
+// and recorded in D39; the self-turnaround entry point is D40, and D44 makes the scratchpad
+// aperture the target. Rendered by ./build-diagrams.sh.
 digraph D2 {
   rankdir=TB;   // tall rather than wide: it has seven ranks and has to fit a page
   ranksep=0.45;
@@ -15,9 +16,9 @@ digraph D2 {
   subgraph cluster_in {
     label="two ways in"; fontname="Arial"; fontsize=10; fontcolor="#666666";
     color="#aaaaaa"; style=dashed;
-    sibling [label="sibling cluster\nstore to our window\n0x5000_0000 | (N << 25)",
+    sibling [label="sibling cluster\nstore to our scratchpad aperture\n0x5100_0000 | (N << 25)",
              style="filled,dashed", color="#888888"];
-    self    [label="our own core\nstore to our own window\nturned around at the boundary (D40)",
+    self    [label="our own core\nstore to our own aperture\nturned around and translated (D40, D44)",
              fillcolor="#eaf2f8", color="#1a5276"];
   }
 
