@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 550" width="940" height="550">
+<title>cva6-multi quadcore CVA6 cluster address map</title>
+<rect x="0" y="0" width="940" height="550" fill="#ffffff"/>
+<text x="14" y="26" font-family="Arial" font-size="16" font-weight="bold" fill="#222">D3 — cva6-multi quadcore CVA6 cluster: address map</text>
+<text x="14" y="45" font-family="Arial" font-size="11" fill="#777">GENERATED from sw/addrmap/cva6-multi-map.json. Bands are equal height, not to scale — the map spans 3 GiB and the smallest region is 4 KiB.</text>
+<rect x="150" y="64" width="300" height="40" rx="3" fill="#f4ecf7" stroke="#6c3483" stroke-width="1.4"/>
+<text x="158" y="91" font-family="Arial" font-size="11" fill="#333">256 KiB</text>
+<text x="14" y="84" font-family="monospace" font-size="12" fill="#222">0x00000000</text>
+<text x="14" y="98" font-family="monospace" font-size="10" fill="#999">0x0003FFFF</text>
+<text x="466" y="82" font-family="Arial" font-size="12" font-weight="bold" fill="#222">debug</text>
+<text x="466" y="97" font-family="Arial" font-size="10" fill="#666">Cheshire debug ROM</text>
+<rect x="150" y="112" width="300" height="40" rx="3" fill="#f4ecf7" stroke="#6c3483" stroke-width="1.4"/>
+<text x="158" y="139" font-family="Arial" font-size="11" fill="#333">256 KiB</text>
+<text x="14" y="132" font-family="monospace" font-size="12" fill="#222">0x02000000</text>
+<text x="14" y="146" font-family="monospace" font-size="10" fill="#999">0x0203FFFF</text>
+<text x="466" y="130" font-family="Arial" font-size="12" font-weight="bold" fill="#222">bootrom</text>
+<text x="466" y="145" font-family="Arial" font-size="10" fill="#666">Cheshire boot ROM. Harts reset here; QEMU needs resetvec set explicitly since it defaults ...</text>
+<rect x="150" y="160" width="300" height="40" rx="3" fill="#fdf2e9" stroke="#935116" stroke-width="1.4"/>
+<text x="158" y="187" font-family="Arial" font-size="11" fill="#333">48 KiB</text>
+<text x="14" y="180" font-family="monospace" font-size="12" fill="#222">0x02040000</text>
+<text x="14" y="194" font-family="monospace" font-size="10" fill="#999">0x0204BFFF</text>
+<text x="466" y="178" font-family="Arial" font-size="12" font-weight="bold" fill="#222">clint</text>
+<text x="466" y="193" font-family="Arial" font-size="10" fill="#666">SiFive-compatible: MSWI at base, MTIMER at +0x4000, mtime at +0xbff8</text>
+<rect x="150" y="208" width="300" height="40" rx="3" fill="#fdf2e9" stroke="#935116" stroke-width="1.4"/>
+<text x="158" y="235" font-family="Arial" font-size="11" fill="#333">4 KiB</text>
+<text x="14" y="228" font-family="monospace" font-size="12" fill="#222">0x03002000</text>
+<text x="14" y="242" font-family="monospace" font-size="10" fill="#999">0x03002FFF</text>
+<text x="466" y="226" font-family="Arial" font-size="12" font-weight="bold" fill="#222">uart0</text>
+<text x="466" y="241" font-family="Arial" font-size="10" fill="#666">reg_shift is the property that drifted. Word-spaced, confirmed by a store fault at base+0xC ...</text>
+<rect x="150" y="256" width="300" height="40" rx="3" fill="#fdf2e9" stroke="#935116" stroke-width="1.4"/>
+<text x="158" y="283" font-family="Arial" font-size="11" fill="#333">64 MiB</text>
+<text x="14" y="276" font-family="monospace" font-size="12" fill="#222">0x04000000</text>
+<text x="14" y="290" font-family="monospace" font-size="10" fill="#999">0x07FFFFFF</text>
+<text x="466" y="274" font-family="Arial" font-size="12" font-weight="bold" fill="#222">plic</text>
+<text x="466" y="289" font-family="Arial" font-size="10" fill="#666">Standard 64 MiB window. Contexts are M then S per hart.</text>
+<rect x="150" y="304" width="300" height="40" rx="3" fill="#eaf2f8" stroke="#1a5276" stroke-width="1.4"/>
+<rect x="150" y="304" width="37" height="40" rx="3" fill="#1a5276" fill-opacity="0.22" stroke="none"/>
+<text x="193" y="331" font-family="Arial" font-size="10" fill="#1a5276">8 MiB populated of 64 MiB reserved</text>
+<text x="14" y="324" font-family="monospace" font-size="12" fill="#222">0x20000000</text>
+<text x="14" y="338" font-family="monospace" font-size="10" fill="#999">0x23FFFFFF</text>
+<text x="466" y="322" font-family="Arial" font-size="12" font-weight="bold" fill="#222">scratchpad</text>
+<text x="466" y="337" font-family="Arial" font-size="10" fill="#666">D24 local alias, cacheable half. D26: 8 MiB of the 64 MiB reserved.</text>
+<rect x="150" y="352" width="300" height="40" rx="3" fill="#eaf2f8" stroke="#1a5276" stroke-width="1.4"/>
+<text x="158" y="379" font-family="Arial" font-size="11" fill="#333">1 MiB</text>
+<text x="14" y="372" font-family="monospace" font-size="12" fill="#222">0x40000000</text>
+<text x="14" y="386" font-family="monospace" font-size="10" fill="#999">0x400FFFFF</text>
+<text x="466" y="370" font-family="Arial" font-size="12" font-weight="bold" fill="#222">clusterregs</text>
+<text x="466" y="385" font-family="Arial" font-size="10" fill="#666">D24 local alias, non-cacheable half: per-cluster MMIO. Stubbed as RAM; real blocks are ...</text>
+<rect x="150" y="400" width="300" height="40" rx="3" fill="#eaf2f8" stroke="#1a5276" stroke-width="1.4"/>
+<text x="158" y="427" font-family="Arial" font-size="11" fill="#333">32 MiB</text>
+<text x="14" y="420" font-family="monospace" font-size="12" fill="#222">0x50000000</text>
+<text x="14" y="434" font-family="monospace" font-size="10" fill="#999">0x51FFFFFF</text>
+<text x="466" y="418" font-family="Arial" font-size="12" font-weight="bold" fill="#222">window</text>
+<text x="466" y="433" font-family="Arial" font-size="10" fill="#666">D23 cluster 0 global aperture, decoded from phase 1 with self-turnaround (D40).</text>
+<rect x="150" y="448" width="300" height="40" rx="3" fill="#e8f6f3" stroke="#117864" stroke-width="1.4"/>
+<text x="158" y="475" font-family="Arial" font-size="11" fill="#333">1 GiB</text>
+<text x="14" y="468" font-family="monospace" font-size="12" fill="#222">0x80000000</text>
+<text x="14" y="482" font-family="monospace" font-size="10" fill="#999">0xBFFFFFFF</text>
+<text x="466" y="466" font-family="Arial" font-size="12" font-weight="bold" fill="#222">dram</text>
+<text x="466" y="481" font-family="Arial" font-size="10" fill="#666">D22. Size is the model default; -m overrides it.</text>
+<text x="14" y="508" font-family="Arial" font-size="10" fill="#666">Cheshire external window 0x20000000–0x7FFFFFFF (D22) — everything the cluster owns sits inside it, or gets no PMA attribute at all.</text>
+<text x="14" y="523" font-family="Arial" font-size="10" fill="#666">Cluster N&#8217;s aperture is 0x50000000 + (N &#171; 25); cluster 0&#8217;s is decoded from phase 1 and self-turnarounds (D40). mhartid = (cluster &#171; 4) | core (D25).</text>
+<text x="14" y="538" font-family="Arial" font-size="10" fill="#666">Shaded portion of a band is backing store; the full band is reserved address space. They differ only for the scratchpad (D26).</text>
+</svg>

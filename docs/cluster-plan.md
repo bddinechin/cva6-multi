@@ -33,6 +33,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
 ### RISC-V architecture
 
 - **RISC-V** — Reduced Instruction Set Computer, fifth Berkeley generation. The open instruction-set architecture this cluster implements.
+- **RVWMO** — RISC-V Weak Memory Ordering. The architecture's memory consistency model: what orderings between loads and stores a program may rely on, and which `fence` is needed for the rest. D45 makes it the inter-cluster ordering contract.
 - **ISA** — Instruction Set Architecture. The instructions and registers software may rely on; per D7 a model that advertises more than it implements kills the boot silently.
 - **CSR** — Control and Status Register. The RISC-V privileged register file, reached by the `csrr`/`csrw` family.
 - **AMO** — Atomic Memory Operation. A read-modify-write performed indivisibly, the basis of locks and of several coherence tests.
@@ -85,6 +86,7 @@ Every acronym of three or more capitals used in this document, spelled out and e
 - **CIE** — The attribute region of Cheshire's external window that CVA6 treats as cacheable, idempotent and executable; the split point between it and the non-cacheable remainder is what D24 places the two cluster-local aliases either side of. The exact semantics of its length parameter are an open item.
 - **EXTROM** — Cheshire's external ROM region.
 - **BOOTROM** — Cheshire's boot ROM region, where the harts reset.
+- **IOMMU** — Input/Output Memory Management Unit. Translates and polices addresses from masters other than a core; one of the two candidate mechanisms for deciding who may write whose scratchpad (D45).
 - **MMIO** — Memory-Mapped Input/Output. Device registers reached as ordinary addresses.
 - **DMA** — Direct Memory Access. A engine that moves data without a core issuing each access.
 - **PASW** — Physical Address Slave Window. A programmable address window, as opposed to a fixed decode rule.
@@ -319,6 +321,56 @@ Every acronym of three or more capitals used in this document, spelled out and e
     porting.
   - **Depends on D43.** The mechanism has to be re-established against the new CCU before this can
     be built. A snoop filter makes it cheaper, not harder.
+
+- **D45 — RSP alignment reviewed: four of four on the classic properties, two architectural gaps
+  that the property list does not cover.** D44 makes the model the architecture; this is what that
+  costs and what it still leaves open.
+  - **What holds.** Remote stores land in the destination's own SRAM; the consumer reads locally at
+    cache speed after one invalidation and refill; and there is **no inter-cluster coherence
+    protocol** — the destination's own CCU does the invalidating, triggered by an ordinary inbound
+    `WriteUnique`, so coherence stops at the cluster boundary.
+    Notification has a path already in the map: the aperture's 1 MiB MMIO region is the global alias
+    of the IMSIC/APLIC pages, so a sibling can raise an MSI. And polling a *cacheable* flag that the
+    producer's write invalidates is cheap, where polling the old non-cacheable window burned fabric
+    bandwidth on every iteration.
+  - **Decision: a read of a sibling's aperture takes an error response.** RSP's latency argument
+    assumes stores only, and the aperture is otherwise readable, so a remote load would be correct
+    and silently slow. D40 already chose error responses for absent clusters on the loud-failure
+    principle; this is the same principle applied to the same boundary. A remote load in an RSP
+    program is nearly always a bug, and the alternative is a performance mystery.
+  - **Decision: the ordering contract is RVWMO, not a bespoke completion protocol.** Making the
+    aperture cacheable and coherent (D44) has a consequence worth stating plainly: the inter-cluster
+    channel is now **ordinary memory**, not a device region with its own rules. So the software
+    contract for the classic write-payload-then-set-flag pattern is the ordinary one — `fence w,w`
+    at the producer, a `fence r,r` or a data dependency at the consumer — and the hardware
+    obligation is that the whole path honours RVWMO across a cluster boundary.
+    - **Rejected: relying on the interconnect to preserve point-to-point order**, or on the producer
+      waiting for the ACE write response before issuing the flag. The first assumes a property of a
+      NoC that does not exist yet; the second serialises and throws away the fire-and-forget
+      behaviour that makes RSP fast. Neither is needed if the region is genuinely memory.
+    - **Not free: it propagates a requirement to the NoC.** Whatever fabric joins the clusters must
+      not reorder in a way that breaks RVWMO between a producer and a destination. That constraint
+      belongs in the NoC's requirements from the start, because discovering it afterwards is the
+      expensive order.
+  - **Open: nothing says who may write whose scratchpad.** Before D44 unreachability-by-shape meant
+    no cluster could touch another's — safety as a property of the map, now spent with nothing in
+    its place. PMP does not help: it gates a hart's *own* accesses, not inbound ones. For a single
+    cooperative application this matches RSP's original setting and is fine; for anything
+    mixed-criticality it is an open door. Two mechanisms are already in reach — a per-cluster
+    inbound permission register, for which the new CCU's CSR block (`ccu_csr.sv`, D43) is a
+    precedent, or an IOMMU on the inbound path, which VCML models and the reconvergence target
+    commits to anyway. Deferred rather than decided, because the answer depends on whether this is
+    ever multi-tenant.
+  - **Open: allocation.** Who owns which part of a destination's 8 MiB is a software contract and
+    needs stating before two teams write to the same offsets.
+  - **Consequence for D18: the litmus gate moves.** The ordering decision above makes the memory
+    model load-bearing at precisely the place D18 does not look — its suite, and Culsans', are
+    single-cluster. D18 therefore **extends to two clusters** rather than porting, and the
+    cross-cluster litmus tests are ours to write. This is the largest piece of work D44 creates.
+  - **Scaling, briefly.** Every inbound remote write snoops every L1 in the destination cluster.
+    Affordable at four cores and the reason eight needs care; the snoop filter on the D43 line
+    improves it materially, which is the same convergence toward a
+    directory noted above.
 
 ### Boot and debug
 

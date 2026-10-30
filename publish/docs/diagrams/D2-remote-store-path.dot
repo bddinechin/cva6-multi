@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: Apache-2.0
+// D2 — what a coherent remote store does inside the cluster. Established from the Culsans RTL
+// and recorded in D39; the self-turnaround entry point is D40. Rendered by ./build-diagrams.sh.
+digraph D2 {
+  rankdir=TB;   // tall rather than wide: it has seven ranks and has to fit a page
+  ranksep=0.45;
+  bgcolor="white";
+  fontname="Arial";
+  labelloc="t";
+  label="D2 — coherent remote store: WriteUnique to invalidated L1D (D39, D40)";
+  node [shape=box, style=filled, fillcolor="#ffffff", color="#333333",
+        fontname="Arial", fontsize=11, margin="0.14,0.08"];
+  edge [color="#555555", fontname="Arial", fontsize=9];
+
+  subgraph cluster_in {
+    label="two ways in"; fontname="Arial"; fontsize=10; fontcolor="#666666";
+    color="#aaaaaa"; style=dashed;
+    sibling [label="sibling cluster\nstore to our window\n0x5000_0000 | (N << 25)",
+             style="filled,dashed", color="#888888"];
+    self    [label="our own core\nstore to our own window\nturned around at the boundary (D40)",
+             fillcolor="#eaf2f8", color="#1a5276"];
+  }
+
+  port [label="extra ACE slave port\nNoSlvPorts = 4 + 1\nneeds the snoop responder shim",
+        fillcolor="#eaf2f8", color="#1a5276"];
+
+  dec [label="ace_trs_dec.sv\ndecodes negatively: only WriteBack and\nWriteNoSnoop bypass the CCU"];
+  fsm [label="ccu_fsm\nDECODE_W → SEND_INVALID_W\nunconditional"];
+  inv [label="CleanInvalid broadcast\nto every non-initiating master"];
+  wb  [label="dirty copy absorbed\nby writeback"];
+  land [label="initiator's write lands\nAW / W forwarded verbatim,\nbyte strobes preserved"];
+  l1d [label="destination L1D lines invalid\nnext local load refills"];
+
+  sibling -> port [style=dashed];
+  self -> dec [label="WriteUnique", color="#1a5276"];
+  port -> dec [label="WriteUnique"];
+  dec -> fsm;
+  fsm -> inv;
+  inv -> wb   [style=dotted, label="if dirty"];
+  wb  -> land [style=dotted];
+  inv -> land [label="then"];
+  inv -> l1d  [style=dashed, label="result"];
+
+  // The attribute that decides whether any of this happens at all.
+  note [shape=box, style="filled,dashed", fillcolor="#fdf6e3", color="#b58900",
+        fontsize=10,
+        label="miss_handler.sv picks WRITE_UNIQUE only for stores that are\nuncacheable AND inside a shareable region — otherwise WRITE_NO_SNOOP,\nwhich bypasses the CCU and invalidates nothing, silently (D40)"];
+  self -> note [style=dotted, color="#b58900", arrowhead=none];
+}
